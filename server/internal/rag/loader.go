@@ -19,9 +19,6 @@ import (
 const datasetsBaseURL = "https://datasets-server.huggingface.co/rows"
 
 // Row is one record from the SQuAD dataset.
-// The HF Datasets Server returns rows inside a `rows` array where each element
-// has a `row` object — we flatten that here for convenience.
-// SQuAD schema: https://huggingface.co/datasets/rajpurkar/squad
 type Row struct {
 	Title    string `json:"title"`
 	Context  string `json:"context"`
@@ -29,65 +26,70 @@ type Row struct {
 }
 
 // datasetsResponse is the raw JSON shape returned by the Datasets Server.
-// We only decode the fields we need; extra fields are silently ignored by json.Unmarshal.
 type datasetsResponse struct {
-	// Rows is a slice of structs — []T in Go, where T is an anonymous struct.
-	// Anonymous structs are handy for one-off JSON shapes you won't reuse.
 	Rows []struct {
 		Row Row `json:"row"`
 	} `json:"rows"`
 }
 
+// Packages available for your implementation.
+var (
+	_ = url.Values{}           // map[string][]string for building query strings safely
+	_ = http.NewRequestWithContext // creates an HTTP request bound to a context
+	_ = json.NewDecoder        // wraps an io.Reader for streaming JSON decoding
+	_ = io.ReadAll             // reads all bytes from an io.Reader
+	_ = fmt.Sprintf            // formats a string (useful for int → string conversion)
+	_ = time.Second            // time.Duration constant
+)
+
 // Load fetches up to limit rows of the given dataset+config from the HF Datasets Server.
 // It returns them as a flat []Row ready for keyword retrieval.
+//
+// EXERCISE — implement this function.
+//
+// Concepts practiced:
+//   - url.Values: a map[string][]string for building URL query strings without
+//     manual string concatenation or injection risk.
+//     https://pkg.go.dev/net/url#Values
+//   - http.NewRequestWithContext: creates an outbound HTTP request bound to a
+//     context so it respects cancellation.
+//     https://pkg.go.dev/net/http#NewRequestWithContext
+//   - http.Client.Do: executes the request and returns (*http.Response, error).
+//     https://pkg.go.dev/net/http#Client.Do
+//   - defer resp.Body.Close(): schedules body cleanup to run when Load returns.
+//     Go's HTTP client requires the body to be closed to reuse the connection.
+//     https://go.dev/tour/flowcontrol/12
+//   - json.NewDecoder(r).Decode(&v): streams JSON from an io.Reader into a struct.
+//     https://pkg.go.dev/encoding/json#Decoder.Decode
+//   - make([]T, 0, n): pre-allocates a slice with capacity n.
+//     https://go.dev/tour/moretypes/13
+//   - fmt.Errorf("context: %w", err): wraps an error with additional context.
+//     https://go.dev/blog/go1.13-errors
+//
+// Steps:
+//  1. Build the query string using url.Values. Set these keys:
+//       "dataset" → dataset, "config" → config, "split" → "train",
+//       "offset" → "0", "limit" → fmt.Sprintf("%d", limit)
+//     Produce the full endpoint: datasetsBaseURL + "?" + params.Encode()
+//
+//  2. Create an http.Client with a 30-second timeout.
+//
+//  3. Build a GET request with http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil).
+//     Return a wrapped error if this fails.
+//
+//  4. Execute the request with client.Do(req). Return a wrapped error on failure.
+//     Immediately defer resp.Body.Close().
+//
+//  5. If resp.StatusCode != http.StatusOK, read the body with io.ReadAll and
+//     return fmt.Errorf("datasets API %d: %s", resp.StatusCode, string(body)).
+//
+//  6. Decode the response body into a datasetsResponse struct.
+//     Return a wrapped error if decoding fails.
+//
+//  7. Pre-allocate rows := make([]Row, 0, len(result.Rows)).
+//     Loop over result.Rows, appending each r.Row to rows.
+//
+//  8. Return rows, nil.
 func Load(ctx context.Context, dataset, config string, limit int) ([]Row, error) {
-	// url.Values is a map[string][]string — use it to build query strings safely.
-	// url.Values.Encode() percent-encodes each value, preventing injection.
-	// https://pkg.go.dev/net/url#Values
-	params := url.Values{}
-	params.Set("dataset", dataset)
-	params.Set("config", config)
-	params.Set("split", "train")
-	params.Set("offset", "0")
-	params.Set("limit", fmt.Sprintf("%d", limit))
-
-	endpoint := datasetsBaseURL + "?" + params.Encode()
-
-	client := &http.Client{Timeout: 30 * time.Second}
-
-	// http.NewRequestWithContext binds the context so this request is cancelled
-	// if ctx is cancelled (e.g. the server shuts down before the load finishes).
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, fmt.Errorf("creating dataset request: %w", err)
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("fetching dataset: %w", err)
-	}
-	// defer schedules resp.Body.Close() to run when Load returns.
-	// This is canonical Go resource cleanup — no need for try/finally.
-	// https://go.dev/tour/flowcontrol/12
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("datasets API %d: %s", resp.StatusCode, string(body))
-	}
-
-	var result datasetsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decoding dataset response: %w", err)
-	}
-
-	// Pre-allocate the slice with make([]T, 0, capacity).
-	// The second arg (0) is the initial length; the third (len) is the capacity.
-	// Pre-allocating avoids repeated reallocation as we append.
-	// https://go.dev/tour/moretypes/13
-	rows := make([]Row, 0, len(result.Rows))
-	for _, r := range result.Rows {
-		rows = append(rows, r.Row)
-	}
-	return rows, nil
+	panic("not implemented")
 }
