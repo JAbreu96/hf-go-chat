@@ -44,17 +44,70 @@ func NewClient(token, model string) *Client {
 	}
 }
 
-// Run is the agent loop. It calls HF once (non-streaming) to check for tool calls,
-// executes any requested tools, then streams the final answer to w.
+// Run is the agent loop — the core of LLM-powered agentic behavior.
+// NewClient, call, and stream are complete; this is the only function to implement.
 //
-// Pointer receiver func (c *Client): c is a pointer, so this method reads c.token
-// etc. without copying the whole struct. Use pointer receivers when the method
-// needs the struct's state or is large enough that copying would be wasteful.
-// https://go.dev/tour/methods/4
+// EXERCISE — implement this function.
 //
-// context.Context is always the first parameter by convention. It carries
-// deadlines and cancellation signals across API call boundaries.
-// https://pkg.go.dev/context
+// ── How the HF chat completions API works ────────────────────────────────────
+// Every request sends a full array of messages and receives one response.
+// The response has a "finish_reason" field that tells you why the model stopped:
+//
+//   "stop"       — normal completion; content holds the final answer
+//   "tool_calls" — the model wants to call a function; no answer yet
+//
+// API reference: https://huggingface.co/docs/inference-providers/tasks/chat-completion
+//
+// ── Why we call non-streaming first ──────────────────────────────────────────
+// Streaming delivers tokens one-by-one — we can't inspect finish_reason until
+// all tokens arrive. A non-streaming call returns complete JSON immediately,
+// so we can branch on finish_reason before committing to a streaming response.
+//
+// ── Message roles ─────────────────────────────────────────────────────────────
+// The conversation is a flat array; roles tell the model who said each line:
+//   "system"    — invisible instructions prepended before the conversation
+//   "user"      — a message from the human
+//   "assistant" — a model turn (may carry ToolCalls instead of Content)
+//   "tool"      — the output of a tool, addressed back to the model
+//
+// A tool-use turn sequence looks like:
+//   user → assistant(tool_calls) → tool(result) → assistant(final answer, streamed)
+//
+// Tool calling reference:
+//   https://huggingface.co/docs/inference-providers/tasks/chat-completion#tool-calling
+//
+// ── Steps ────────────────────────────────────────────────────────────────────
+//  1. Start an infinite for loop — for {} in Go.
+//     https://go.dev/tour/flowcontrol/1
+//
+//  2. Call c.call(ctx, messages, tools, false) — non-streaming.
+//     Return a wrapped error on failure (fmt.Errorf("hf call: %w", err)).
+//     Immediately defer resp.Body.Close() — required to reuse TCP connections.
+//     https://pkg.go.dev/net/http#Response
+//
+//  3. If resp.StatusCode != http.StatusOK, read body with io.ReadAll and return
+//     fmt.Errorf("hf API %d: %s", resp.StatusCode, string(body)).
+//
+//  4. Decode the body: var chat ChatResponse
+//     json.NewDecoder(resp.Body).Decode(&chat)
+//     https://pkg.go.dev/encoding/json#Decoder.Decode
+//
+//  5. Guard: if len(chat.Choices) == 0 { return errors.New("hf returned no choices") }
+//
+//  6. choice := chat.Choices[0]
+//
+//  7. If choice.FinishReason == "tool_calls":
+//       a. Call executor(ctx, choice.Message.ToolCalls) — runs the real tool.
+//       b. Append choice.Message to messages.
+//          (The assistant's tool_call turn must stay in history so the model
+//           knows what it requested.)
+//       c. Append Message{Role: "tool", Content: toolResult,
+//            ToolCallID: choice.Message.ToolCalls[0].ID}
+//          ToolCallID links this result to the specific call the model made.
+//       d. continue — loop back to step 2 with the enriched message history.
+//
+//  8. finish_reason is "stop" — the model is done with tool use.
+//     Return c.stream(ctx, messages, w, flush) to stream the final answer.
 func (c *Client) Run(
 	ctx context.Context,
 	messages []Message,
@@ -63,63 +116,7 @@ func (c *Client) Run(
 	w io.Writer,
 	flush func(),
 ) error {
-	// Agent loop — Go has one loop keyword: for.
-	// for {} with no condition is an infinite loop; we exit with return.
-	// https://go.dev/tour/flowcontrol/1
-	for {
-		// First call: stream=false so we receive a complete JSON response and
-		// can inspect finish_reason before deciding whether to stream to the client.
-		resp, err := c.call(ctx, messages, tools, false)
-		if err != nil {
-			return fmt.Errorf("hf call: %w", err)
-		}
-		// defer runs when the enclosing function returns, in LIFO order.
-		// Always defer resp.Body.Close() — Go's HTTP client reuses TCP connections
-		// only when the body is fully read and closed. Skipping this leaks connections.
-		// https://pkg.go.dev/net/http#Response
-		defer resp.Body.Close() //nolint:gocritic
-
-		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
-			return fmt.Errorf("hf API %d: %s", resp.StatusCode, string(body))
-		}
-
-		var chat ChatResponse
-		// json.NewDecoder wraps the response body (an io.Reader) in a streaming
-		// JSON decoder. Decode(&chat) fills in the struct fields from the JSON.
-		if err := json.NewDecoder(resp.Body).Decode(&chat); err != nil {
-			return fmt.Errorf("decoding hf response: %w", err)
-		}
-
-		if len(chat.Choices) == 0 {
-			return errors.New("hf returned no choices")
-		}
-
-		choice := chat.Choices[0]
-
-		// The model is requesting a tool call — execute it and loop.
-		if choice.FinishReason == "tool_calls" {
-			toolResult, err := executor(ctx, choice.Message.ToolCalls)
-			if err != nil {
-				return fmt.Errorf("tool execution: %w", err)
-			}
-
-			// append grows the slice by appending the element. If the backing
-			// array has spare capacity it reuses it; otherwise it allocates a new
-			// larger one. The slice header (pointer, len, cap) is updated.
-			// https://go.dev/tour/moretypes/15
-			messages = append(messages, choice.Message) // assistant turn with tool_calls
-			messages = append(messages, Message{
-				Role:       "tool",
-				Content:    toolResult,
-				ToolCallID: choice.Message.ToolCalls[0].ID,
-			})
-			continue // back to top — call HF again with the tool result injected
-		}
-
-		// finish_reason == "stop": no tool call, stream the final answer to the client.
-		return c.stream(ctx, messages, w, flush)
-	}
+	panic("not implemented")
 }
 
 // call makes one POST to the HF completions endpoint and returns the raw response.

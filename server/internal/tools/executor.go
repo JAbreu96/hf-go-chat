@@ -61,25 +61,49 @@ func (e *Executor) runWebSearch(ctx context.Context, arguments string) (string, 
 }
 
 // WebSearchTool returns the tool definition sent to the HF model.
-// The model reads this to understand what tools are available and when to use them.
+// The model reads this schema to know the tool exists, what it does, and what
+// arguments to provide when it decides to call it.
+//
+// EXERCISE — implement this function.
+//
+// ── Tool definitions and JSON Schema ─────────────────────────────────────────
+// A tool definition has three parts:
+//   Type     — always "function" for function-calling tools
+//   Function — the actual definition (name, description, parameters)
+//
+// The "parameters" field uses JSON Schema to describe the expected arguments.
+// JSON Schema reference: https://json-schema.org/understanding-json-schema/
+//
+// The model uses the description to decide WHEN to call the tool,
+// and the parameters schema to know WHAT arguments to include.
+// Tool calling reference:
+//   https://huggingface.co/docs/inference-providers/tasks/chat-completion#tool-calling
+//
+// ── Steps ────────────────────────────────────────────────────────────────────
+// Return an hf.Tool with:
+//
+//  Type: "function"
+//
+//  Function: hf.ToolFunction{
+//    Name:        "web_search"
+//    Description: "Search the web for current information not available in your
+//                  training data. Use this for recent events, live data, or
+//                  anything that may have changed since your knowledge cutoff."
+//
+//    Parameters: map[string]any{
+//      "type": "object",
+//      "properties": map[string]any{
+//        "query": map[string]any{
+//          "type":        "string",
+//          "description": "The search query",
+//        },
+//      },
+//      "required": []string{"query"},   // the model MUST provide this field
+//    },
+//  }
+//
+// The "required" field is critical — without it the model may omit the query
+// argument and runWebSearch will return an error.
 func WebSearchTool() hf.Tool {
-	return hf.Tool{
-		Type: "function",
-		Function: hf.ToolFunction{
-			Name:        "web_search",
-			Description: "Search the web for current information not available in your training data. Use this for recent events, live data, or anything that may have changed since your knowledge cutoff.",
-			// Parameters follows JSON Schema — the model uses this to know what
-			// fields to include in its tool call arguments.
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"query": map[string]any{
-						"type":        "string",
-						"description": "The search query",
-					},
-				},
-				"required": []string{"query"},
-			},
-		},
-	}
+	panic("not implemented")
 }

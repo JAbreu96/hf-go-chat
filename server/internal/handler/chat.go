@@ -59,18 +59,35 @@ func (h *Chat) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// RAG: find the last user message and retrieve relevant context from SQuAD.
-	lastUserContent := lastUserMessage(req.Messages)
-	contexts := rag.Retrieve(h.rows, lastUserContent, 3)
-
-	systemPrompt := systemPromptBase
-	if len(contexts) > 0 {
-		systemPrompt += "\n\nReference material:\n" + strings.Join(contexts, "\n---\n")
-	}
-
-	// Prepend the system message. Slices grow with append; the system message
-	// comes first so the model sees it before any conversation turns.
-	messages := append([]hf.Message{{Role: "system", Content: systemPrompt}}, req.Messages...)
+	// ── EXERCISE Part 1: Build the message history with RAG context ─────────────
+	//
+	// LLMs have no memory between requests — you must send the full conversation
+	// history on every call. We also inject a system message and retrieved context
+	// so the model can answer questions grounded in our SQuAD knowledge base.
+	//
+	// Step A — Find the user's latest message text:
+	//   lastUserContent := lastUserMessage(req.Messages)
+	//
+	// Step B — Retrieve the top-3 relevant SQuAD contexts for that query:
+	//   contexts := rag.Retrieve(h.rows, lastUserContent, 3)
+	//   rag.Retrieve is already implemented — it returns []string of matching passages.
+	//
+	// Step C — Build the system prompt:
+	//   Start with systemPromptBase (defined above).
+	//   If len(contexts) > 0, append:
+	//     "\n\nReference material:\n" + strings.Join(contexts, "\n---\n")
+	//   strings.Join reference: https://pkg.go.dev/strings#Join
+	//
+	// Step D — Prepend a system message to the conversation:
+	//   messages := append([]hf.Message{{Role: "system", Content: systemPrompt}}, req.Messages...)
+	//   The system role is a special role that sets model behavior.
+	//   It must be the FIRST message — the model reads it before any user turns.
+	//   https://huggingface.co/docs/inference-providers/tasks/chat-completion
+	//
+	// Replace the stub below with your implementation:
+	var messages []hf.Message
+	_ = strings.Join // hint: you'll need this for Step C
+	_ = rag.Retrieve // hint: you'll need this for Step B
 
 	// Set SSE headers before writing any body.
 	// Once WriteHeader or Write is called the headers are sent and cannot be changed.
@@ -89,11 +106,22 @@ func (h *Chat) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	toolDefs := []hf.Tool{tools.WebSearchTool()}
+	// ── EXERCISE Part 2: Define the tools available to the model ─────────────
+	//
+	// Tools (also called "functions") are capabilities you expose to the model.
+	// You send the tool list with every request; the model decides if/when to use them.
+	// If it wants to call a tool, it returns finish_reason == "tool_calls" instead
+	// of generating an answer — your agent loop (in client.go) handles that.
+	//
+	// Step E — Build the tool list:
+	//   toolDefs := []hf.Tool{tools.WebSearchTool()}
+	//   WebSearchTool() is defined in tools/executor.go — implement it first.
+	//
+	// Replace the stub below with your implementation:
+	var toolDefs []hf.Tool
 
 	slog.Info("chat request",
 		"messages", len(req.Messages),
-		"rag_contexts", len(contexts),
 	)
 
 	err := h.client.Run(
