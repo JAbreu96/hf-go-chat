@@ -20,8 +20,8 @@ func NewExecutor(braveKey string) *Executor {
 
 // Packages available for your implementation.
 var (
-	_ = json.Unmarshal // decodes JSON bytes into a Go value
-	_ = fmt.Errorf     // creates a formatted error, supports %w for wrapping
+	_ = json.Unmarshal // decodes JSON bytes into a Go value — https://pkg.go.dev/encoding/json#Unmarshal
+	_ = fmt.Errorf     // creates a formatted error, supports %w for wrapping — https://pkg.go.dev/fmt#Errorf
 )
 
 // Run executes all tool calls the model requested and returns the combined result.
@@ -31,8 +31,9 @@ var (
 // Concepts practiced:
 //   - Switch statement on a string: routes different tool names to handlers.
 //     https://go.dev/tour/flowcontrol/9
-//   - Returning a formatted error for the default case (unknown tool name).
-//     fmt.Errorf("unknown tool: %s", call.Function.Name)
+//   - fmt.Errorf: creates a formatted error; %w wraps an existing error for errors.Is.
+//     https://pkg.go.dev/fmt#Errorf
+//   - Returning early with "", nil for the empty case: Go's guard clause pattern.
 //
 // Steps:
 //  1. If len(calls) == 0, return "", nil immediately.
@@ -49,6 +50,8 @@ func (e *Executor) Run(ctx context.Context, calls []hf.ToolCall) (string, error)
 // EXERCISE — implement this function.
 //
 // Concepts practiced:
+//   - json.Unmarshal(data, &v): decodes JSON bytes into a Go value.
+//     https://pkg.go.dev/encoding/json#Unmarshal
 //   - Two-pass JSON unmarshal: the model's tool arguments arrive as a JSON string
 //     (e.g. `{"query":"..."}`) embedded inside the outer JSON response. We need a
 //     second json.Unmarshal call to decode that inner string.

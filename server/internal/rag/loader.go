@@ -34,12 +34,12 @@ type datasetsResponse struct {
 
 // Packages available for your implementation.
 var (
-	_ = url.Values{}           // map[string][]string for building query strings safely
-	_ = http.NewRequestWithContext // creates an HTTP request bound to a context
-	_ = json.NewDecoder        // wraps an io.Reader for streaming JSON decoding
-	_ = io.ReadAll             // reads all bytes from an io.Reader
-	_ = fmt.Sprintf            // formats a string (useful for int → string conversion)
-	_ = time.Second            // time.Duration constant
+	_ = url.Values{}               // map[string][]string for building query strings — https://pkg.go.dev/net/url#Values
+	_ = http.NewRequestWithContext // creates an HTTP request bound to a context — https://pkg.go.dev/net/http#NewRequestWithContext
+	_ = json.NewDecoder            // wraps an io.Reader for streaming JSON decoding — https://pkg.go.dev/encoding/json#NewDecoder
+	_ = io.ReadAll                 // reads all bytes from an io.Reader — https://pkg.go.dev/io#ReadAll
+	_ = fmt.Sprintf                // formats a string (useful for int → string conversion) — https://pkg.go.dev/fmt#Sprintf
+	_ = time.Second                // time.Duration constant — https://pkg.go.dev/time#Second
 )
 
 // Load fetches up to limit rows of the given dataset+config from the HF Datasets Server.

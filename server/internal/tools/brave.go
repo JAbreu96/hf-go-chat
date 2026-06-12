@@ -28,13 +28,13 @@ type braveResponse struct {
 
 // Packages available for your implementation.
 var (
-	_ = url.Values{}
-	_ = http.NewRequestWithContext
-	_ = json.NewDecoder
-	_ = io.ReadAll
-	_ = fmt.Sprintf
-	_ = time.Second
-	_ = strings.Builder{}
+	_ = url.Values{}               // map[string][]string for query params — https://pkg.go.dev/net/url#Values
+	_ = http.NewRequestWithContext // creates an HTTP request bound to a context — https://pkg.go.dev/net/http#NewRequestWithContext
+	_ = json.NewDecoder            // wraps io.Reader for streaming JSON decode — https://pkg.go.dev/encoding/json#NewDecoder
+	_ = io.ReadAll                 // reads all bytes from an io.Reader — https://pkg.go.dev/io#ReadAll
+	_ = fmt.Sprintf                // formats a string — https://pkg.go.dev/fmt#Sprintf
+	_ = time.Second                // time.Duration constant — https://pkg.go.dev/time#Second
+	_ = strings.Builder{}          // incrementally builds a string — https://pkg.go.dev/strings#Builder
 )
 
 // Search calls the Brave Search API and returns the top results as a
@@ -46,8 +46,16 @@ var (
 // Concepts practiced:
 //   - url.Values for query string encoding (same as loader.go but now with a custom header).
 //     https://pkg.go.dev/net/url#Values
+//   - http.Client: the HTTP client struct; set Timeout to avoid hanging forever.
+//     https://pkg.go.dev/net/http#Client
+//   - http.NewRequestWithContext: creates an outbound request bound to a context.
+//     https://pkg.go.dev/net/http#NewRequestWithContext
 //   - Setting HTTP request headers: req.Header.Set("Key", "value").
 //     https://pkg.go.dev/net/http#Header.Set
+//   - json.NewDecoder(r).Decode(&v): streams JSON from an io.Reader into a struct.
+//     https://pkg.go.dev/encoding/json#Decoder.Decode
+//   - io.ReadAll: reads all bytes from an io.Reader (used on error body).
+//     https://pkg.go.dev/io#ReadAll
 //   - strings.Builder: the idiomatic way to build a string incrementally
 //     without allocating a new string on every concatenation.
 //     https://pkg.go.dev/strings#Builder

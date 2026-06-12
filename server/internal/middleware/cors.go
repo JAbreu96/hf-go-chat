@@ -7,8 +7,8 @@ import "net/http"
 
 // Packages available for your implementation.
 var (
-	_ = http.HandlerFunc(nil) // a function type that implements http.Handler
-	_ = http.MethodOptions    // the string "OPTIONS"
+	_ = http.HandlerFunc(nil) // a function type that implements http.Handler — https://pkg.go.dev/net/http#HandlerFunc
+	_ = http.MethodOptions    // the string "OPTIONS" — https://pkg.go.dev/net/http#MethodOptions
 )
 
 // CORS wraps next with permissive CORS headers so the Next.js dev server on :3000
@@ -20,15 +20,18 @@ var (
 //   - http.Handler interface: any type with ServeHTTP(ResponseWriter, *Request) satisfies it.
 //     No `implements` keyword — Go interfaces are implicit.
 //     https://pkg.go.dev/net/http#Handler
-//   - http.HandlerFunc: a named function type defined as:
-//       type HandlerFunc func(ResponseWriter, *Request)
-//     It has a ServeHTTP method, so it satisfies http.Handler.
-//     This is Go's "function that implements an interface" pattern.
+//   - http.HandlerFunc: a named function type that satisfies http.Handler.
+//     type HandlerFunc func(ResponseWriter, *Request) — it has a ServeHTTP method.
 //     https://pkg.go.dev/net/http#HandlerFunc
 //   - Middleware signature: func(next http.Handler) http.Handler — the outer function
 //     receives the handler to wrap; the returned handler adds behaviour around it.
-//   - w.Header().Set(key, value): sets a response header before writing the body.
+//   - w.Header().Set(key, value): sets a response header before the body is written.
+//     Must be called before WriteHeader or Write, otherwise headers are already sent.
+//     https://pkg.go.dev/net/http#Header.Set
+//   - w.WriteHeader(code): sends the HTTP status code and locks the headers.
+//     https://pkg.go.dev/net/http#ResponseWriter
 //   - next.ServeHTTP(w, r): delegates to the wrapped handler.
+//     https://pkg.go.dev/net/http#Handler
 //
 // Steps:
 //  1. Return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { ... })
