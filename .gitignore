@@ -1,0 +1,15 @@
+# Environment — never commit secrets
+server/.env
+client/.env.local
+
+# Go
+server/bin/
+server/*.exe
+
+# Next.js
+client/.next/
+client/node_modules/
+client/.claude/
+
+# macOS
+.DS_Store
