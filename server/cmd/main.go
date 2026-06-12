@@ -21,92 +21,99 @@ import (
 	"github.com/joelchrist/hf-go-chat/internal/tools"
 )
 
+// Packages available for your implementation — blank-identifier pins keep unused imports legal.
+var (
+	_ = context.Background    // root context with no parent
+	_ = context.WithTimeout   // context with a deadline
+	_ = signal.Notify         // routes OS signals to a channel
+	_ = slog.Info             // structured log line
+	_ = errors.Is             // unwrap-aware error check
+	_ = time.Second           // time.Duration constant
+	_ = os.Exit               // terminate the process with an exit code
+	_ = syscall.SIGINT        // signal sent by Ctrl-C
+	_ = http.NewServeMux      // creates a request multiplexer (router)
+	_ = config.Load           // loads env vars into a Config struct
+	_ = handler.Health        // GET /health handler func
+	_ = handler.NewChat       // constructs the Chat handler
+	_ = hf.NewClient          // constructs the HF API client
+	_ = middleware.CORS       // CORS middleware wrapper
+	_ = rag.Load              // loads SQuAD rows from HF Datasets Server
+	_ = tools.NewExecutor     // constructs the tool executor
+)
+
+// main is the entry point — execution starts here.
+//
+// EXERCISE — implement this function.
+//
+// Concepts practiced:
+//   - log/slog structured logging: slog.Info("msg", "key", val).
+//     https://pkg.go.dev/log/slog
+//   - := short variable declaration — declares and assigns in one step.
+//     https://go.dev/ref/spec#Short_variable_declarations
+//   - context.Background(): the root context; use when there is no parent.
+//     https://pkg.go.dev/context#Background
+//   - Goroutines: go func() { ... }() launches a concurrent function.
+//     The trailing () immediately calls the anonymous function.
+//     https://go.dev/tour/concurrency/1
+//   - Buffered channels: make(chan os.Signal, 1) — capacity 1 so signal.Notify
+//     can send without a waiting receiver; prevents dropped signals.
+//     https://go.dev/tour/concurrency/3
+//   - Blocking receive <-quit: pauses the goroutine until a value arrives.
+//     https://go.dev/tour/concurrency/2
+//   - context.WithTimeout for graceful shutdown: gives in-flight requests 10s to finish.
+//     https://pkg.go.dev/context#WithTimeout
+//   - defer cancel(): ensures context resources are freed even on early return.
+//     https://go.dev/tour/flowcontrol/12
+//
+// Steps:
+//  1. slog.Info("starting hf-go-chat server")
+//
+//  2. cfg, err := config.Load(). On error: slog.Error + os.Exit(1).
+//
+//  3. slog.Info("loading dataset", "name", cfg.DatasetName, "limit", cfg.DatasetLimit)
+//     rows, err := rag.Load(context.Background(), cfg.DatasetName, cfg.DatasetCfg, cfg.DatasetLimit)
+//     On error: slog.Error + os.Exit(1).
+//     slog.Info("dataset loaded", "rows", len(rows))
+//
+//  4. Wire up dependencies:
+//       hfClient  := hf.NewClient(cfg.HFToken, cfg.Model)
+//       executor  := tools.NewExecutor(cfg.BraveKey)
+//       chatHandler := handler.NewChat(hfClient, executor, rows)
+//
+//  5. Create the mux (http.NewServeMux) and register routes:
+//       "GET /health"    → handler.Health (a plain func — use mux.HandleFunc)
+//       "POST /api/chat" → chatHandler    (implements http.Handler — use mux.Handle)
+//
+//  6. Create the server:
+//       srv := &http.Server{
+//           Addr:         ":" + cfg.Port,
+//           Handler:      middleware.CORS(mux),
+//           ReadTimeout:  10 * time.Second,
+//           WriteTimeout: 120 * time.Second,
+//           IdleTimeout:  60 * time.Second,
+//       }
+//
+//  7. Launch the server in a goroutine:
+//       go func() {
+//           slog.Info("listening", "addr", srv.Addr)
+//           if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+//               slog.Error("server error", "err", err)
+//               os.Exit(1)
+//           }
+//       }()
+//
+//  8. Set up graceful shutdown:
+//       quit := make(chan os.Signal, 1)
+//       signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+//       <-quit   // block until Ctrl-C or kill
+//       slog.Info("shutting down")
+//
+//  9. Shutdown with a 10-second timeout:
+//       shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+//       defer cancel()
+//       if err := srv.Shutdown(shutdownCtx); err != nil {
+//           slog.Error("shutdown error", "err", err)
+//       }
 func main() {
-	// slog is Go's structured logging package (added in Go 1.21).
-	// Structured = key-value pairs alongside the message, easy to parse in log aggregators.
-	// https://pkg.go.dev/log/slog
-	slog.Info("starting hf-go-chat server")
-
-	// Load returns (Config, error) — two return values.
-	// := declares both cfg and err as new variables in this function scope.
-	// https://go.dev/ref/spec#Short_variable_declarations
-	cfg, err := config.Load()
-	if err != nil {
-		slog.Error("config error", "err", err)
-		os.Exit(1)
-	}
-
-	// Load the SQuAD dataset from the HF Datasets Server into memory.
-	// context.Background() is the root context — use it when there is no parent context.
-	// https://pkg.go.dev/context#Background
-	slog.Info("loading dataset", "name", cfg.DatasetName, "limit", cfg.DatasetLimit)
-	rows, err := rag.Load(context.Background(), cfg.DatasetName, cfg.DatasetCfg, cfg.DatasetLimit)
-	if err != nil {
-		slog.Error("dataset load failed", "err", err)
-		os.Exit(1)
-	}
-	slog.Info("dataset loaded", "rows", len(rows))
-
-	// Wire up dependencies.
-	hfClient := hf.NewClient(cfg.HFToken, cfg.Model)
-	executor := tools.NewExecutor(cfg.BraveKey)
-	chatHandler := handler.NewChat(hfClient, executor, rows)
-
-	// http.NewServeMux creates a fresh request multiplexer (router).
-	// The pattern "POST /api/chat" is a Go 1.22 enhanced pattern that matches
-	// only POST requests to that path. https://pkg.go.dev/net/http#ServeMux
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", handler.Health)
-	mux.Handle("POST /api/chat", chatHandler)
-
-	// Wrap the entire mux with CORS middleware.
-	// middleware.CORS(mux) returns a new http.Handler that sets CORS headers
-	// before delegating to mux — the classic middleware chain pattern.
-	srv := &http.Server{
-		Addr:         ":" + cfg.Port,
-		Handler:      middleware.CORS(mux),
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 120 * time.Second, // long for streaming responses
-		IdleTimeout:  60 * time.Second,
-	}
-
-	// Goroutine — go func() launches a new goroutine: a lightweight thread managed
-	// by the Go runtime (not the OS). The IIFE (immediately-invoked function expression)
-	// pattern runs an anonymous function in the new goroutine.
-	// https://go.dev/tour/concurrency/1
-	go func() {
-		slog.Info("listening", "addr", srv.Addr)
-		// ListenAndServe blocks until the server stops.
-		// http.ErrServerClosed is returned when Shutdown() is called — that's not an error.
-		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-			slog.Error("server error", "err", err)
-			os.Exit(1)
-		}
-	}()
-
-	// Graceful shutdown: block the main goroutine until a termination signal arrives.
-	//
-	// make(chan os.Signal, 1) creates a buffered channel with capacity 1.
-	// Buffered means signal.Notify can send without a receiver ready — capacity 1
-	// ensures no signal is dropped if we're slow to receive.
-	// https://go.dev/tour/concurrency/3
-	quit := make(chan os.Signal, 1)
-	// signal.Notify routes SIGINT (Ctrl-C) and SIGTERM (kill / Docker stop) to quit.
-	// https://pkg.go.dev/os/signal#Notify
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-
-	// <-quit blocks the main goroutine until a value is received on the channel.
-	// When a signal arrives, execution continues to shutdown.
-	// https://go.dev/tour/concurrency/2
-	<-quit
-	slog.Info("shutting down")
-
-	// Give in-flight requests up to 10 seconds to finish before hard-closing.
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	// defer cancel() ensures the context's resources are freed even if Shutdown returns early.
-	defer cancel()
-
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		slog.Error("shutdown error", "err", err)
-	}
+	panic("not implemented")
 }

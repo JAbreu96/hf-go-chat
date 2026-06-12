@@ -16,104 +16,83 @@ const systemPromptBase = `You are a helpful assistant with access to a knowledge
 When answering, prefer information from the provided reference material if it is relevant.
 If you need current or real-time information, use the web_search tool.`
 
-// Chat is a struct handler — it holds dependencies (hf client, executor, rag rows)
-// instead of using global variables. This makes the handler testable and explicit.
+// Chat is a struct handler — it holds dependencies instead of using global variables.
+// This makes the handler testable and keeps state explicit.
 type Chat struct {
 	client   *hf.Client
 	executor *tools.Executor
 	rows     []rag.Row
 }
 
-// NewChat constructs a Chat handler.
+// NewChat constructs a Chat handler with its dependencies.
 func NewChat(client *hf.Client, executor *tools.Executor, rows []rag.Row) *Chat {
-	return &Chat{
-		client:   client,
-		executor: executor,
-		rows:     rows,
-	}
+	return &Chat{client: client, executor: executor, rows: rows}
 }
 
-// ServeHTTP implements http.Handler — a struct with a ServeHTTP method satisfies
-// the interface automatically. We can register &Chat{} directly on the mux.
+// Packages available for your implementation.
+var (
+	_ = json.NewDecoder    // decode request body
+	_ = http.Error         // write an error status + plain-text body
+	_ = strings.Join       // join a []string with a separator
+	_ = fmt.Fprintf        // write formatted string to any io.Writer
+	_ = slog.Info          // structured log line
+)
+
+// ServeHTTP implements http.Handler. A struct with a ServeHTTP method satisfies
+// the http.Handler interface automatically — no `implements` keyword needed.
 // https://pkg.go.dev/net/http#Handler
+//
+// EXERCISE — implement this method.
+//
+// Concepts practiced:
+//   - Method validation: reject non-POST requests with http.Error + http.StatusMethodNotAllowed.
+//   - json.NewDecoder(r.Body).Decode(&v): r.Body is an io.ReadCloser; NewDecoder accepts io.Reader.
+//   - SSE response headers: Content-Type "text/event-stream", Cache-Control "no-cache",
+//     Connection "keep-alive" — must be set BEFORE any body is written.
+//   - http.Flusher type assertion (comma-ok form):
+//       flusher, ok := w.(http.Flusher)
+//     Not all ResponseWriters implement Flusher — always use the comma-ok form.
+//     https://pkg.go.dev/net/http#Flusher
+//   - slog.Info("event", "key", value): structured logging.
+//     https://pkg.go.dev/log/slog
+//   - fmt.Fprintf(w, "data: {\"error\":%q}\n\n", err): writing an SSE error frame
+//     after headers have already been sent (can't change status code at this point).
+//
+// Steps:
+//  1. If r.Method != http.MethodPost, call http.Error(w, "method not allowed", 405) and return.
+//
+//  2. Decode the request body into:
+//       var req struct { Messages []hf.Message `json:"messages"` }
+//     On error: http.Error(w, "invalid JSON body", http.StatusBadRequest) and return.
+//     If len(req.Messages) == 0: http.Error(w, "messages array is required", 400) and return.
+//
+//  3. RAG retrieval:
+//       lastUserContent := lastUserMessage(req.Messages)
+//       contexts := rag.Retrieve(h.rows, lastUserContent, 3)
+//     Build systemPrompt: start with systemPromptBase; if len(contexts) > 0, append:
+//       "\n\nReference material:\n" + strings.Join(contexts, "\n---\n")
+//
+//  4. Prepend system message:
+//       messages := append([]hf.Message{{Role:"system", Content:systemPrompt}}, req.Messages...)
+//
+//  5. Set SSE response headers on w (three calls to w.Header().Set).
+//
+//  6. Type-assert w to http.Flusher (comma-ok). If !ok, http.Error 500 and return.
+//
+//  7. slog.Info("chat request", "messages", len(req.Messages), "rag_contexts", len(contexts))
+//
+//  8. Call h.client.Run(r.Context(), messages, []hf.Tool{tools.WebSearchTool()},
+//       h.executor.Run, w, flusher.Flush)
+//     If err != nil:
+//       fmt.Fprintf(w, "data: {\"error\":%q}\n\n", err.Error())
+//       flusher.Flush()
+//       slog.Error("chat handler error", "err", err)
 func (h *Chat) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// chatRequest is the JSON body sent by the Next.js client.
-	var req struct {
-		Messages []hf.Message `json:"messages"`
-	}
-
-	// json.NewDecoder(r.Body).Decode reads directly from the request body stream.
-	// r.Body is an io.ReadCloser — it satisfies io.Reader so NewDecoder accepts it.
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
-		return
-	}
-
-	if len(req.Messages) == 0 {
-		http.Error(w, "messages array is required", http.StatusBadRequest)
-		return
-	}
-
-	// RAG: find the last user message and retrieve relevant context from SQuAD.
-	lastUserContent := lastUserMessage(req.Messages)
-	contexts := rag.Retrieve(h.rows, lastUserContent, 3)
-
-	systemPrompt := systemPromptBase
-	if len(contexts) > 0 {
-		systemPrompt += "\n\nReference material:\n" + strings.Join(contexts, "\n---\n")
-	}
-
-	// Prepend the system message. Slices grow with append; the system message
-	// comes first so the model sees it before any conversation turns.
-	messages := append([]hf.Message{{Role: "system", Content: systemPrompt}}, req.Messages...)
-
-	// Set SSE headers before writing any body.
-	// Once WriteHeader or Write is called the headers are sent and cannot be changed.
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-
-	// Type assertion with the comma-ok form: flusher, ok := w.(http.Flusher)
-	// http.Flusher is an optional interface — not all ResponseWriters implement it.
-	// The comma-ok form returns ok=false instead of panicking if it isn't implemented.
-	// We need Flusher to push each SSE chunk to the client immediately.
-	// https://pkg.go.dev/net/http#Flusher
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "streaming not supported", http.StatusInternalServerError)
-		return
-	}
-
-	toolDefs := []hf.Tool{tools.WebSearchTool()}
-
-	slog.Info("chat request",
-		"messages", len(req.Messages),
-		"rag_contexts", len(contexts),
-	)
-
-	err := h.client.Run(
-		r.Context(),
-		messages,
-		toolDefs,
-		h.executor.Run,
-		w,
-		flusher.Flush,
-	)
-	if err != nil {
-		// We may have already written SSE lines — can't change status code now.
-		// Write an SSE error event so the client knows something went wrong.
-		fmt.Fprintf(w, "data: {\"error\":%q}\n\n", err.Error())
-		flusher.Flush()
-		slog.Error("chat handler error", "err", err)
-	}
+	panic("not implemented")
 }
 
-// lastUserMessage finds the content of the most recent user message in the history.
+// lastUserMessage finds the content of the most recent user turn.
+// This is complete — no exercise here.
 func lastUserMessage(messages []hf.Message) string {
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Role == "user" {

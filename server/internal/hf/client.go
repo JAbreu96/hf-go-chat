@@ -14,14 +14,13 @@ import (
 
 const baseURL = "https://router.huggingface.co/v1/chat/completions"
 
-// ErrNoFlusher is a sentinel error — a package-level variable of type error.
-// Callers check for it with errors.Is(err, hf.ErrNoFlusher).
+// ErrNoFlusher is a sentinel error value — a package-level variable of type error.
+// Callers check: errors.Is(err, hf.ErrNoFlusher)
 // https://pkg.go.dev/errors#New
 var ErrNoFlusher = errors.New("response writer does not implement http.Flusher")
 
-// Client holds the credentials and HTTP transport for all HF API calls.
-// Fields are unexported (lowercase) — only code inside package hf can access them.
-// This is Go's encapsulation: no private/protected keywords, just case.
+// Client holds credentials and the HTTP transport for all HF API calls.
+// Unexported fields (lowercase) are only accessible within package hf.
 // https://go.dev/ref/spec#Exported_identifiers
 type Client struct {
 	token      string
@@ -29,32 +28,73 @@ type Client struct {
 	httpClient *http.Client
 }
 
-// NewClient is a constructor — idiomatic Go uses a plain function named NewX
-// that returns a pointer to the newly allocated value.
-// Returning *Client means all callers share the same Client in memory.
+// Packages available for your implementation.
+var (
+	_ = bytes.NewReader    // wraps []byte as an io.Reader for http.NewRequestWithContext
+	_ = bufio.NewScanner  // wraps io.Reader for line-by-line reading
+	_ = json.Marshal      // encodes a Go value to JSON bytes
+	_ = json.NewDecoder   // wraps io.Reader for streaming JSON decode
+	_ = fmt.Fprintf       // writes formatted string to any io.Writer
+	_ = io.ReadAll        // reads all bytes from an io.Reader
+	_ = time.Second       // time.Duration constant
+)
+
+// NewClient is a constructor — idiomatic Go uses NewX to return a pointer to a new value.
+// Returning *Client means all callers share the same instance in memory.
 // https://go.dev/doc/effective_go#composite_literals
+//
+// EXERCISE — implement this function.
+//
+// Steps:
+//  1. Return &Client{ ... } with:
+//       token: token
+//       model: model
+//       httpClient: &http.Client{Timeout: 90 * time.Second}
+//     Use Go's zero values — only set Timeout; everything else defaults safely.
+//     https://go.dev/ref/spec#The_zero_value
 func NewClient(token, model string) *Client {
-	return &Client{
-		token: token,
-		model: model,
-		// http.Client{} uses Go's zero values for unset fields.
-		// We only override Timeout; everything else defaults safely.
-		// https://go.dev/ref/spec#The_zero_value
-		httpClient: &http.Client{Timeout: 90 * time.Second},
-	}
+	panic("not implemented")
 }
 
 // Run is the agent loop. It calls HF once (non-streaming) to check for tool calls,
-// executes any requested tools, then streams the final answer to w.
+// executes any tools the model requested, then streams the final answer to w.
 //
-// Pointer receiver func (c *Client): c is a pointer, so this method reads c.token
-// etc. without copying the whole struct. Use pointer receivers when the method
-// needs the struct's state or is large enough that copying would be wasteful.
+// Pointer receiver func (c *Client): c gives access to c.token, c.model without
+// copying the whole struct. Use pointer receivers when the method reads struct state.
 // https://go.dev/tour/methods/4
 //
-// context.Context is always the first parameter by convention. It carries
-// deadlines and cancellation signals across API call boundaries.
+// context.Context is always the first parameter by convention — it carries
+// deadlines and cancellation signals across API boundaries.
 // https://pkg.go.dev/context
+//
+// EXERCISE — implement this function.
+//
+// Concepts practiced:
+//   - for {} infinite loop with return to exit: Go's only loop keyword.
+//     https://go.dev/tour/flowcontrol/1
+//   - defer resp.Body.Close(): runs when the enclosing function returns.
+//     Skipping this leaks TCP connections.
+//     https://go.dev/tour/flowcontrol/12
+//   - json.NewDecoder(resp.Body).Decode(&v): streaming JSON decode.
+//   - append growing a slice mid-loop.
+//     https://go.dev/tour/moretypes/15
+//   - continue: skips to the next loop iteration.
+//
+// Steps:
+//  1. Start an infinite for loop.
+//  2. Call c.call(ctx, messages, tools, false) — non-streaming first call.
+//     Return a wrapped error on failure.
+//  3. defer resp.Body.Close() immediately after checking the error.
+//  4. If resp.StatusCode != http.StatusOK, read body with io.ReadAll and return an error.
+//  5. Decode the response into a ChatResponse. Return a wrapped error on failure.
+//  6. If len(chat.Choices) == 0, return errors.New("hf returned no choices").
+//  7. choice := chat.Choices[0]
+//  8. If choice.FinishReason == "tool_calls":
+//       a. Call executor(ctx, choice.Message.ToolCalls). Return a wrapped error on failure.
+//       b. Append choice.Message to messages (the assistant's tool_call turn).
+//       c. Append a Message{Role:"tool", Content:toolResult, ToolCallID: choice.Message.ToolCalls[0].ID}.
+//       d. continue — loop back and call HF again with the tool result.
+//  9. If finish_reason is anything else (typically "stop"): return c.stream(ctx, messages, w, flush).
 func (c *Client) Run(
 	ctx context.Context,
 	messages []Message,
@@ -63,124 +103,58 @@ func (c *Client) Run(
 	w io.Writer,
 	flush func(),
 ) error {
-	// Agent loop — Go has one loop keyword: for.
-	// for {} with no condition is an infinite loop; we exit with return.
-	// https://go.dev/tour/flowcontrol/1
-	for {
-		// First call: stream=false so we receive a complete JSON response and
-		// can inspect finish_reason before deciding whether to stream to the client.
-		resp, err := c.call(ctx, messages, tools, false)
-		if err != nil {
-			return fmt.Errorf("hf call: %w", err)
-		}
-		// defer runs when the enclosing function returns, in LIFO order.
-		// Always defer resp.Body.Close() — Go's HTTP client reuses TCP connections
-		// only when the body is fully read and closed. Skipping this leaks connections.
-		// https://pkg.go.dev/net/http#Response
-		defer resp.Body.Close() //nolint:gocritic
-
-		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
-			return fmt.Errorf("hf API %d: %s", resp.StatusCode, string(body))
-		}
-
-		var chat ChatResponse
-		// json.NewDecoder wraps the response body (an io.Reader) in a streaming
-		// JSON decoder. Decode(&chat) fills in the struct fields from the JSON.
-		if err := json.NewDecoder(resp.Body).Decode(&chat); err != nil {
-			return fmt.Errorf("decoding hf response: %w", err)
-		}
-
-		if len(chat.Choices) == 0 {
-			return errors.New("hf returned no choices")
-		}
-
-		choice := chat.Choices[0]
-
-		// The model is requesting a tool call — execute it and loop.
-		if choice.FinishReason == "tool_calls" {
-			toolResult, err := executor(ctx, choice.Message.ToolCalls)
-			if err != nil {
-				return fmt.Errorf("tool execution: %w", err)
-			}
-
-			// append grows the slice by appending the element. If the backing
-			// array has spare capacity it reuses it; otherwise it allocates a new
-			// larger one. The slice header (pointer, len, cap) is updated.
-			// https://go.dev/tour/moretypes/15
-			messages = append(messages, choice.Message) // assistant turn with tool_calls
-			messages = append(messages, Message{
-				Role:       "tool",
-				Content:    toolResult,
-				ToolCallID: choice.Message.ToolCalls[0].ID,
-			})
-			continue // back to top — call HF again with the tool result injected
-		}
-
-		// finish_reason == "stop": no tool call, stream the final answer to the client.
-		return c.stream(ctx, messages, w, flush)
-	}
+	panic("not implemented")
 }
 
-// call makes one POST to the HF completions endpoint and returns the raw response.
+// call makes one POST to the HF completions endpoint and returns the raw *http.Response.
+// The caller is responsible for closing resp.Body.
+//
+// EXERCISE — implement this function.
+//
+// Concepts practiced:
+//   - json.Marshal(v): encodes a Go value to []byte.
+//   - bytes.NewReader(b): wraps []byte as an io.Reader (what http.NewRequestWithContext needs).
+//   - http.NewRequestWithContext: binds the context so cancellation propagates.
+//     https://pkg.go.dev/net/http#NewRequestWithContext
+//   - req.Header.Set: sets a request header.
+//   - c.httpClient.Do(req): executes the request.
+//
+// Steps:
+//  1. Build a ChatRequest{Model: c.model, Messages: messages, Tools: tools, Stream: stream}.
+//  2. json.Marshal it into data []byte. Return a wrapped error on failure.
+//  3. http.NewRequestWithContext(ctx, http.MethodPost, baseURL, bytes.NewReader(data)).
+//     Return a wrapped error on failure.
+//  4. Set headers: "Authorization" → "Bearer " + c.token, "Content-Type" → "application/json".
+//  5. Return c.httpClient.Do(req).
 func (c *Client) call(ctx context.Context, messages []Message, tools []Tool, stream bool) (*http.Response, error) {
-	body := ChatRequest{
-		Model:    c.model,
-		Messages: messages,
-		Tools:    tools,
-		Stream:   stream,
-	}
-
-	// json.Marshal encodes body as JSON bytes.
-	// bytes.NewReader wraps []byte as an io.Reader — the type http.NewRequestWithContext expects.
-	data, err := json.Marshal(body)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling request: %w", err)
-	}
-
-	// http.NewRequestWithContext attaches ctx so the outbound request is cancelled
-	// if the handler's context is cancelled (e.g. the browser disconnects).
-	// https://pkg.go.dev/net/http#NewRequestWithContext
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL, bytes.NewReader(data))
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Content-Type", "application/json")
-
-	return c.httpClient.Do(req)
+	panic("not implemented")
 }
 
-// stream makes a streaming POST and writes each SSE line to w, flushing after each.
+// stream makes a streaming POST and writes each SSE line to w, flushing after each one.
+//
+// EXERCISE — implement this function.
+//
+// Concepts practiced:
+//   - bufio.NewScanner(r): wraps any io.Reader; splits on newlines by default.
+//     https://pkg.go.dev/bufio#Scanner
+//   - scanner.Buffer(buf, max): increases the internal buffer for long SSE lines.
+//   - scanner.Scan() / scanner.Text(): advance one line / get the current line as string.
+//   - fmt.Fprintf(w, format, args): writes formatted output to any io.Writer.
+//     Here w is an http.ResponseWriter — it satisfies io.Writer via Write([]byte).
+//   - flush(): the http.Flusher.Flush call, passed in as a func() for testability.
+//
+// Steps:
+//  1. Call c.call(ctx, messages, nil, true). Return a wrapped error on failure.
+//     Defer resp.Body.Close().
+//  2. If resp.StatusCode != http.StatusOK, read body and return a formatted error.
+//  3. Create a bufio.NewScanner(resp.Body).
+//     Call scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024) to raise the limit.
+//  4. Loop with scanner.Scan():
+//       line := scanner.Text()
+//       if line == "" { continue }
+//       fmt.Fprintf(w, "%s\n\n", line)
+//       flush()
+//  5. Return scanner.Err().
 func (c *Client) stream(ctx context.Context, messages []Message, w io.Writer, flush func()) error {
-	resp, err := c.call(ctx, messages, nil, true)
-	if err != nil {
-		return fmt.Errorf("hf stream call: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("hf stream API %d: %s", resp.StatusCode, string(body))
-	}
-
-	// bufio.NewScanner wraps any io.Reader and splits on newlines by default.
-	// It reads the SSE response body one line at a time without loading it all into memory.
-	// https://pkg.go.dev/bufio#Scanner
-	scanner := bufio.NewScanner(resp.Body)
-	// Increase the scanner buffer to handle large SSE data lines.
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			continue
-		}
-		// fmt.Fprintf writes a formatted string to any io.Writer.
-		// w is an http.ResponseWriter — it satisfies io.Writer because it has Write([]byte).
-		// https://pkg.go.dev/fmt#Fprintf
-		fmt.Fprintf(w, "%s\n\n", line)
-		flush()
-	}
-	return scanner.Err()
+	panic("not implemented")
 }
