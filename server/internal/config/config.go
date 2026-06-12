@@ -20,9 +20,16 @@ const (
 	DefaultLimit      = 1000
 )
 
+// Packages available for your implementation — the blank identifier keeps them importable
+// without a "declared and not used" compile error while the body is unimplemented.
+var (
+	_ = os.Getenv    // reads an env var by name; returns "" if unset
+	_ = errors.New   // creates a plain error value from a string
+	_ = strconv.Atoi // parses a decimal string as int, returns (int, error)
+)
+
 // Config holds all values loaded from the environment.
-// Unexported fields would be hidden from other packages — here we export all
-// fields so handlers can read them directly.
+// Exported fields (uppercase) are readable by any package that imports config.
 // https://go.dev/ref/spec#Exported_identifiers
 type Config struct {
 	HFToken      string
@@ -35,55 +42,34 @@ type Config struct {
 }
 
 // Load reads environment variables and returns a populated Config.
-// Multiple return values — Go functions return (value, error) instead of throwing.
-// The caller must check the error before using cfg.
-// https://go.dev/tour/basics/6
+//
+// EXERCISE — implement this function.
+//
+// Concepts practiced:
+//   - Multiple return values: Go functions return (value, error) instead of throwing.
+//     https://go.dev/tour/basics/6
+//   - Error handling: check every error explicitly with `if err != nil`.
+//     https://go.dev/blog/error-handling-and-go
+//   - os.Getenv: reads a named environment variable; returns "" if unset.
+//     https://pkg.go.dev/os#Getenv
+//   - errors.New: creates a new error value with a message.
+//     https://pkg.go.dev/errors#New
+//   - strconv.Atoi: converts a string to int, returns (int, error).
+//     https://pkg.go.dev/strconv#Atoi
+//   - Struct literal: Config{Field: value, OtherField: otherValue}
+//     https://go.dev/tour/basics/5
+//
+// Steps:
+//  1. Read "HF_TOKEN" with os.Getenv. If empty, return Config{} and an error:
+//     errors.New("HF_TOKEN environment variable is required")
+//  2. Read "BRAVE_API_KEY". Return an error if empty (same pattern as step 1).
+//  3. Read "PORT". If empty, use the DefaultPort constant.
+//  4. Read "HF_MODEL". If empty, use DefaultModel.
+//  5. Read "DATASET_NAME". If empty, use DefaultDataset.
+//  6. Read "DATASET_LIMIT". If non-empty, convert it to int with strconv.Atoi.
+//     If Atoi returns an error, return Config{} and errors.New("DATASET_LIMIT must be an integer").
+//     If empty, use DefaultLimit.
+//  7. Return a fully populated Config{...} and nil as the error.
 func Load() (Config, error) {
-	token := os.Getenv("HF_TOKEN")
-	// if err != nil — the canonical Go error check. There is no try/catch.
-	// https://go.dev/blog/error-handling-and-go
-	if token == "" {
-		return Config{}, errors.New("HF_TOKEN environment variable is required")
-	}
-
-	brave := os.Getenv("BRAVE_API_KEY")
-	if brave == "" {
-		return Config{}, errors.New("BRAVE_API_KEY environment variable is required")
-	}
-
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = DefaultPort
-	}
-
-	model := os.Getenv("HF_MODEL")
-	if model == "" {
-		model = DefaultModel
-	}
-
-	dataset := os.Getenv("DATASET_NAME")
-	if dataset == "" {
-		dataset = DefaultDataset
-	}
-
-	limit := DefaultLimit
-	if raw := os.Getenv("DATASET_LIMIT"); raw != "" {
-		// strconv.Atoi returns (int, error) — two return values in one assignment.
-		// The := operator declares both n and err as new variables in this scope.
-		n, err := strconv.Atoi(raw)
-		if err != nil {
-			return Config{}, errors.New("DATASET_LIMIT must be an integer")
-		}
-		limit = n
-	}
-
-	return Config{
-		HFToken:      token,
-		BraveKey:     brave,
-		Port:         port,
-		Model:        model,
-		DatasetName:  dataset,
-		DatasetCfg:   DefaultDatasetCfg,
-		DatasetLimit: limit,
-	}, nil
+	panic("not implemented")
 }

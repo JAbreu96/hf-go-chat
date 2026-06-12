@@ -5,56 +5,51 @@ import (
 	"strings"
 )
 
-// Retrieve returns the top-n most relevant contexts for query.
-// Relevance is scored by counting how many query words appear in the row's context.
-// This is intentionally simple — production RAG uses vector embeddings.
+// Packages available for your implementation.
+var (
+	_ = strings.Fields   // splits on whitespace → []string
+	_ = strings.ToLower  // lowercases a string
+	_ = strings.Contains // reports whether substr is in s
+	_ = sort.Slice       // sorts a slice in place with a less func
+)
+
+// Retrieve returns the top-n most relevant Row contexts for the given query.
+// Relevance is scored by counting how many query words appear in each row's Context field.
+//
+// EXERCISE — implement this function.
+//
+// Concepts practiced:
+//   - strings.Fields: splits a string on whitespace into a []string of tokens.
+//     https://pkg.go.dev/strings#Fields
+//   - strings.ToLower: lowercases a string for case-insensitive comparison.
+//     https://pkg.go.dev/strings#ToLower
+//   - strings.Contains: reports whether a substring appears in a string.
+//     https://pkg.go.dev/strings#Contains
+//   - Anonymous struct: a struct type defined inline, useful for one-off groupings.
+//     https://go.dev/ref/spec#Struct_types
+//   - make([]T, 0, capacity): allocates a slice with a pre-set capacity to avoid
+//     repeated reallocation as you append. https://go.dev/tour/moretypes/13
+//   - append: adds elements to a slice, growing it if needed.
+//     https://go.dev/tour/moretypes/15
+//   - sort.Slice: sorts in-place using a comparison function you provide.
+//     https://pkg.go.dev/sort#Slice
+//   - Blank identifier _: discards the loop index when you only need the value.
+//     https://go.dev/ref/spec#Blank_identifier
+//
+// Steps:
+//  1. Tokenise the query: split it into words with strings.Fields after lowercasing.
+//  2. Define an anonymous struct type `scored` with fields `context string` and `score int`.
+//     Allocate a `results` slice of that type with make([]scored, 0, len(rows)).
+//  3. Loop over rows. For each row, count how many tokens from step 1 appear in
+//     strings.ToLower(row.Context) using strings.Contains.
+//     If the score is greater than 0, append a scored{context: ..., score: ...} to results.
+//  4. Sort results descending by score using sort.Slice.
+//     The less function: results[i].score > results[j].score  (higher score = earlier).
+//  5. Cap topN: if topN > len(results), set topN = len(results).
+//  6. Build the return value: allocate a []string with make([]string, 0, topN),
+//     then append results[k].context for k in 0..topN-1.
+//     Hint: range over results[:topN] and use _ to discard the index.
+//  7. Return the slice of context strings.
 func Retrieve(rows []Row, query string, topN int) []string {
-	// strings.Fields splits on any whitespace and returns a []string.
-	// https://pkg.go.dev/strings#Fields
-	tokens := strings.Fields(strings.ToLower(query))
-
-	type scored struct {
-		context string
-		score   int
-	}
-
-	// Make a slice of scored structs — scored{} is a struct literal.
-	// We pre-allocate with len(rows) since we score every row.
-	results := make([]scored, 0, len(rows))
-
-	for _, row := range rows {
-		lower := strings.ToLower(row.Context)
-		score := 0
-		for _, t := range tokens {
-			// strings.Contains reports whether substr is within s.
-			// https://pkg.go.dev/strings#Contains
-			if strings.Contains(lower, t) {
-				score++
-			}
-		}
-		if score > 0 {
-			results = append(results, scored{context: row.Context, score: score})
-		}
-	}
-
-	// sort.Slice sorts a slice in place using a less function.
-	// The less function receives indices i and j and returns true if i should come before j.
-	// We sort descending by score, so higher scores come first.
-	// https://pkg.go.dev/sort#Slice
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].score > results[j].score
-	})
-
-	// Cap topN at the number of results we actually have.
-	if topN > len(results) {
-		topN = len(results)
-	}
-
-	// Range over a slice: the blank identifier _ discards the index we don't need.
-	// https://go.dev/ref/spec#Blank_identifier
-	contexts := make([]string, 0, topN)
-	for _, r := range results[:topN] {
-		contexts = append(contexts, r.context)
-	}
-	return contexts
+	panic("not implemented")
 }
