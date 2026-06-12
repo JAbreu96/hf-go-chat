@@ -38,9 +38,16 @@ function parseDelta(line: string): string | null {
 // --- Component ---
 
 export default function ChatPage() {
+  // useState<T>(initial) declares a state variable and a setter.
+  // The generic T pins the type; TypeScript infers it from the initial value when possible.
+  // https://react.dev/reference/react/useState
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+
+  // useRef holds a mutable value that does NOT trigger re-renders when changed.
+  // Here we store a DOM ref to the scroll anchor div at the bottom of the message list.
+  // https://react.dev/reference/react/useRef
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to the latest message after every render where messages changed.
@@ -50,77 +57,63 @@ export default function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // EXERCISE: implement handleSubmit.
+  //
+  // This function fires when the user submits the chat form. It should:
+  //   1. Prevent the default form submission (full page reload).
+  //   2. Optimistically add the user message and an empty assistant message to state.
+  //   3. POST the conversation to /api/chat (the Next.js Route Handler proxy).
+  //   4. Read the streaming SSE response body chunk-by-chunk.
+  //   5. Decode each chunk, parse the delta token, and append it to the assistant message.
+  //
+  // Step 1 — Guard against empty input or double submission.
+  //   e.preventDefault()
+  //   const text = input.trim(); if (!text || isStreaming) return;
+  //
+  // Step 2 — Optimistically add both messages and reset form state.
+  //   const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: text }
+  //   const assistantMsg: Message = { id: crypto.randomUUID(), role: "assistant", content: "" }
+  //   setMessages((prev) => [...prev, userMsg, assistantMsg])
+  //   setInput(""); setIsStreaming(true)
+  //   https://react.dev/reference/react/useState#updating-state-based-on-the-previous-state
+  //
+  // Step 3 — POST to the Next.js Route Handler.
+  //   fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" },
+  //     body: JSON.stringify({ messages: [...messages, userMsg].map(({ role, content }) => ({ role, content })) }) })
+  //   Throw if !res.ok or !res.body.
+  //   https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch
+  //
+  // Step 4 — Obtain a reader and decoder to consume the stream incrementally.
+  //   const reader = res.body.getReader()
+  //   const decoder = new TextDecoder()
+  //   let buffer = ""
+  //   Loop: const { value, done } = await reader.read(); if (done) break;
+  //   https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream/getReader
+  //
+  // Step 5 — Decode the Uint8Array chunk, keeping multi-byte char state intact.
+  //   buffer += decoder.decode(value, { stream: true })
+  //   { stream: true } prevents flushing the decoder's internal state between calls —
+  //   necessary when a UTF-8 character (e.g. emoji) spans two chunks.
+  //   https://developer.mozilla.org/en-US/docs/Web/API/TextDecoder/decode
+  //
+  // Step 6 — Split the buffer on "\n" and parse each complete SSE line.
+  //   const lines = buffer.split("\n"); buffer = lines.pop() ?? ""
+  //   The last element may be an incomplete line — keep it in buffer for the next chunk.
+  //   Call parseDelta(line.trim()) on each line; it returns the token string or null.
+  //
+  // Step 7 — Append the token to the assistant message with a functional setState.
+  //   setMessages((prev) =>
+  //     prev.map((m) => m.id === assistantMsg.id ? { ...m, content: m.content + delta } : m)
+  //   )
+  //   WHY functional update: the callback always receives the latest state snapshot,
+  //   preventing stale closures from overwriting tokens already streamed in.
+  //   https://react.dev/reference/react/useState#updating-state-based-on-the-previous-state
+  //
+  // Step 8 — Handle errors and always clear isStreaming.
+  //   catch: setMessages with the error string as the assistant content
+  //   finally: setIsStreaming(false)
   async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    const text = input.trim();
-    if (!text || isStreaming) return;
-
-    const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: text };
-    const assistantMsg: Message = { id: crypto.randomUUID(), role: "assistant", content: "" };
-
-    setMessages((prev) => [...prev, userMsg, assistantMsg]);
-    setInput("");
-    setIsStreaming(true);
-
-    try {
-      // POST to the Next.js Route Handler — same origin, no CORS issue.
-      // The Route Handler proxies to the Go server server-side.
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // Send the full conversation history so the model has context.
-        body: JSON.stringify({
-          messages: [...messages, userMsg].map(({ role, content }) => ({ role, content })),
-        }),
-      });
-
-      if (!res.ok || !res.body) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-
-      // res.body is a ReadableStream<Uint8Array>. getReader() locks the stream
-      // and returns a ReadableStreamDefaultReader to pull chunks from it.
-      // https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream/getReader
-      const reader = res.body.getReader();
-      // TextDecoder converts Uint8Array bytes to a UTF-8 string.
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        // { stream: true } tells the decoder not to flush its internal state
-        // between calls — needed when a multi-byte character spans two chunks.
-        buffer += decoder.decode(value, { stream: true });
-
-        // Split on newlines. A chunk boundary may land mid-line, so we keep
-        // the last (possibly incomplete) segment in the buffer.
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          const delta = parseDelta(line.trim());
-          if (delta) {
-            // Functional setState: pass a function so we always operate on the
-            // latest state — avoids stale closure capturing old messages array.
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMsg.id ? { ...m, content: m.content + delta } : m
-              )
-            );
-          }
-        }
-      }
-    } catch (err) {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantMsg.id ? { ...m, content: `Error: ${String(err)}` } : m
-        )
-      );
-    } finally {
-      setIsStreaming(false);
-    }
+    throw new Error("not implemented — see the steps above");
   }
 
   return (
