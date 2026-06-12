@@ -23,9 +23,9 @@ const (
 // Packages available for your implementation — the blank identifier keeps them importable
 // without a "declared and not used" compile error while the body is unimplemented.
 var (
-	_ = os.Getenv    // reads an env var by name; returns "" if unset
-	_ = errors.New   // creates a plain error value from a string
-	_ = strconv.Atoi // parses a decimal string as int, returns (int, error)
+	_ = os.Getenv    // reads an env var by name; returns "" if unset — https://pkg.go.dev/os#Getenv
+	_ = errors.New   // creates a plain error value from a string — https://pkg.go.dev/errors#New
+	_ = strconv.Atoi // parses a decimal string as int, returns (int, error) — https://pkg.go.dev/strconv#Atoi
 )
 
 // Config holds all values loaded from the environment.

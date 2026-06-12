@@ -7,10 +7,10 @@ import (
 
 // Packages available for your implementation.
 var (
-	_ = strings.Fields   // splits on whitespace → []string
-	_ = strings.ToLower  // lowercases a string
-	_ = strings.Contains // reports whether substr is in s
-	_ = sort.Slice       // sorts a slice in place with a less func
+	_ = strings.Fields   // splits on whitespace → []string — https://pkg.go.dev/strings#Fields
+	_ = strings.ToLower  // lowercases a string — https://pkg.go.dev/strings#ToLower
+	_ = strings.Contains // reports whether substr is in s — https://pkg.go.dev/strings#Contains
+	_ = sort.Slice       // sorts a slice in place with a less func — https://pkg.go.dev/sort#Slice
 )
 
 // Retrieve returns the top-n most relevant Row contexts for the given query.
