@@ -30,13 +30,13 @@ type Client struct {
 
 // Packages available for your implementation.
 var (
-	_ = bytes.NewReader    // wraps []byte as an io.Reader for http.NewRequestWithContext
-	_ = bufio.NewScanner  // wraps io.Reader for line-by-line reading
-	_ = json.Marshal      // encodes a Go value to JSON bytes
-	_ = json.NewDecoder   // wraps io.Reader for streaming JSON decode
-	_ = fmt.Fprintf       // writes formatted string to any io.Writer
-	_ = io.ReadAll        // reads all bytes from an io.Reader
-	_ = time.Second       // time.Duration constant
+	_ = bytes.NewReader   // wraps []byte as an io.Reader — https://pkg.go.dev/bytes#NewReader
+	_ = bufio.NewScanner  // wraps io.Reader for line-by-line reading — https://pkg.go.dev/bufio#NewScanner
+	_ = json.Marshal      // encodes a Go value to JSON bytes — https://pkg.go.dev/encoding/json#Marshal
+	_ = json.NewDecoder   // wraps io.Reader for streaming JSON decode — https://pkg.go.dev/encoding/json#NewDecoder
+	_ = fmt.Fprintf       // writes formatted string to any io.Writer — https://pkg.go.dev/fmt#Fprintf
+	_ = io.ReadAll        // reads all bytes from an io.Reader — https://pkg.go.dev/io#ReadAll
+	_ = time.Second       // time.Duration constant — https://pkg.go.dev/time#Second
 )
 
 // NewClient is a constructor — idiomatic Go uses NewX to return a pointer to a new value.
@@ -73,12 +73,19 @@ func NewClient(token, model string) *Client {
 //   - for {} infinite loop with return to exit: Go's only loop keyword.
 //     https://go.dev/tour/flowcontrol/1
 //   - defer resp.Body.Close(): runs when the enclosing function returns.
-//     Skipping this leaks TCP connections.
+//     Skipping this leaks TCP connections — Go's HTTP client reuses connections only
+//     when the body is fully read and closed.
 //     https://go.dev/tour/flowcontrol/12
-//   - json.NewDecoder(resp.Body).Decode(&v): streaming JSON decode.
+//   - json.NewDecoder(resp.Body).Decode(&v): streams JSON from an io.Reader into a struct.
+//     https://pkg.go.dev/encoding/json#Decoder.Decode
+//   - errors.New: creates a plain error value from a string (no wrapping).
+//     https://pkg.go.dev/errors#New
+//   - io.ReadAll: reads all bytes from an io.Reader (used here to read error bodies).
+//     https://pkg.go.dev/io#ReadAll
 //   - append growing a slice mid-loop.
 //     https://go.dev/tour/moretypes/15
 //   - continue: skips to the next loop iteration.
+//     https://go.dev/ref/spec#Continue_statements
 //
 // Steps:
 //  1. Start an infinite for loop.
@@ -112,12 +119,16 @@ func (c *Client) Run(
 // EXERCISE — implement this function.
 //
 // Concepts practiced:
-//   - json.Marshal(v): encodes a Go value to []byte.
-//   - bytes.NewReader(b): wraps []byte as an io.Reader (what http.NewRequestWithContext needs).
-//   - http.NewRequestWithContext: binds the context so cancellation propagates.
+//   - json.Marshal(v): encodes a Go value to JSON []byte.
+//     https://pkg.go.dev/encoding/json#Marshal
+//   - bytes.NewReader(b): wraps []byte as an io.Reader (required by http.NewRequestWithContext).
+//     https://pkg.go.dev/bytes#NewReader
+//   - http.NewRequestWithContext: creates an outbound request bound to a context.
 //     https://pkg.go.dev/net/http#NewRequestWithContext
-//   - req.Header.Set: sets a request header.
-//   - c.httpClient.Do(req): executes the request.
+//   - req.Header.Set(key, value): sets a request header; call after NewRequestWithContext.
+//     https://pkg.go.dev/net/http#Header.Set
+//   - c.httpClient.Do(req): executes the request and returns (*http.Response, error).
+//     https://pkg.go.dev/net/http#Client.Do
 //
 // Steps:
 //  1. Build a ChatRequest{Model: c.model, Messages: messages, Tools: tools, Stream: stream}.
@@ -137,11 +148,16 @@ func (c *Client) call(ctx context.Context, messages []Message, tools []Tool, str
 // Concepts practiced:
 //   - bufio.NewScanner(r): wraps any io.Reader; splits on newlines by default.
 //     https://pkg.go.dev/bufio#Scanner
-//   - scanner.Buffer(buf, max): increases the internal buffer for long SSE lines.
-//   - scanner.Scan() / scanner.Text(): advance one line / get the current line as string.
+//   - scanner.Buffer(buf, max): raises the scanner's internal buffer limit.
+//     Default is 64 KiB; SSE lines with large JSON payloads can exceed that.
+//     https://pkg.go.dev/bufio#Scanner.Buffer
+//   - scanner.Scan() / scanner.Text(): advance one line / return the current line.
+//     https://pkg.go.dev/bufio#Scanner.Scan
 //   - fmt.Fprintf(w, format, args): writes formatted output to any io.Writer.
-//     Here w is an http.ResponseWriter — it satisfies io.Writer via Write([]byte).
-//   - flush(): the http.Flusher.Flush call, passed in as a func() for testability.
+//     http.ResponseWriter satisfies io.Writer because it has a Write([]byte) method.
+//     https://pkg.go.dev/fmt#Fprintf
+//   - flush(): calls http.Flusher.Flush — pushes buffered data to the client immediately.
+//     https://pkg.go.dev/net/http#Flusher
 //
 // Steps:
 //  1. Call c.call(ctx, messages, nil, true). Return a wrapped error on failure.

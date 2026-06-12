@@ -23,22 +23,22 @@ import (
 
 // Packages available for your implementation — blank-identifier pins keep unused imports legal.
 var (
-	_ = context.Background    // root context with no parent
-	_ = context.WithTimeout   // context with a deadline
-	_ = signal.Notify         // routes OS signals to a channel
-	_ = slog.Info             // structured log line
-	_ = errors.Is             // unwrap-aware error check
-	_ = time.Second           // time.Duration constant
-	_ = os.Exit               // terminate the process with an exit code
-	_ = syscall.SIGINT        // signal sent by Ctrl-C
-	_ = http.NewServeMux      // creates a request multiplexer (router)
-	_ = config.Load           // loads env vars into a Config struct
-	_ = handler.Health        // GET /health handler func
-	_ = handler.NewChat       // constructs the Chat handler
-	_ = hf.NewClient          // constructs the HF API client
-	_ = middleware.CORS       // CORS middleware wrapper
-	_ = rag.Load              // loads SQuAD rows from HF Datasets Server
-	_ = tools.NewExecutor     // constructs the tool executor
+	_ = context.Background  // root context with no parent — https://pkg.go.dev/context#Background
+	_ = context.WithTimeout // context with a deadline — https://pkg.go.dev/context#WithTimeout
+	_ = signal.Notify       // routes OS signals to a channel — https://pkg.go.dev/os/signal#Notify
+	_ = slog.Info           // structured log line — https://pkg.go.dev/log/slog
+	_ = errors.Is           // unwrap-aware error check — https://pkg.go.dev/errors#Is
+	_ = time.Second         // time.Duration constant — https://pkg.go.dev/time#Second
+	_ = os.Exit             // terminate the process with an exit code — https://pkg.go.dev/os#Exit
+	_ = syscall.SIGINT      // signal sent by Ctrl-C — https://pkg.go.dev/syscall#SIGINT
+	_ = http.NewServeMux    // creates a request multiplexer (router) — https://pkg.go.dev/net/http#NewServeMux
+	_ = config.Load         // loads env vars into a Config struct
+	_ = handler.Health      // GET /health handler func
+	_ = handler.NewChat     // constructs the Chat handler
+	_ = hf.NewClient        // constructs the HF API client
+	_ = middleware.CORS     // CORS middleware wrapper
+	_ = rag.Load            // loads SQuAD rows from HF Datasets Server
+	_ = tools.NewExecutor   // constructs the tool executor
 )
 
 // main is the entry point — execution starts here.
@@ -52,17 +52,31 @@ var (
 //     https://go.dev/ref/spec#Short_variable_declarations
 //   - context.Background(): the root context; use when there is no parent.
 //     https://pkg.go.dev/context#Background
+//   - http.NewServeMux(): creates a new request multiplexer (router).
+//     Go 1.22+ patterns support method prefixes: "GET /path", "POST /path".
+//     https://pkg.go.dev/net/http#NewServeMux
+//   - &http.Server{}: the server struct; set timeouts to prevent resource leaks.
+//     ReadTimeout, WriteTimeout, IdleTimeout are the three important ones.
+//     https://pkg.go.dev/net/http#Server
+//   - os.Exit(1): terminates the process immediately with a non-zero exit code.
+//     https://pkg.go.dev/os#Exit
 //   - Goroutines: go func() { ... }() launches a concurrent function.
 //     The trailing () immediately calls the anonymous function.
 //     https://go.dev/tour/concurrency/1
+//   - errors.Is(err, target): unwrap-aware comparison — works through wrapped errors.
+//     https://pkg.go.dev/errors#Is
 //   - Buffered channels: make(chan os.Signal, 1) — capacity 1 so signal.Notify
 //     can send without a waiting receiver; prevents dropped signals.
 //     https://go.dev/tour/concurrency/3
-//   - Blocking receive <-quit: pauses the goroutine until a value arrives.
+//   - signal.Notify(ch, sig...): routes OS signals to the channel.
+//     https://pkg.go.dev/os/signal#Notify
+//   - syscall.SIGINT / syscall.SIGTERM: Ctrl-C and kill/Docker-stop signals.
+//     https://pkg.go.dev/syscall#SIGINT
+//   - Blocking receive <-quit: pauses the goroutine until a value arrives on the channel.
 //     https://go.dev/tour/concurrency/2
 //   - context.WithTimeout for graceful shutdown: gives in-flight requests 10s to finish.
 //     https://pkg.go.dev/context#WithTimeout
-//   - defer cancel(): ensures context resources are freed even on early return.
+//   - defer cancel(): ensures the context's resources are freed even on early return.
 //     https://go.dev/tour/flowcontrol/12
 //
 // Steps:

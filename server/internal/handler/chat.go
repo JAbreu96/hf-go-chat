@@ -31,11 +31,11 @@ func NewChat(client *hf.Client, executor *tools.Executor, rows []rag.Row) *Chat 
 
 // Packages available for your implementation.
 var (
-	_ = json.NewDecoder    // decode request body
-	_ = http.Error         // write an error status + plain-text body
-	_ = strings.Join       // join a []string with a separator
-	_ = fmt.Fprintf        // write formatted string to any io.Writer
-	_ = slog.Info          // structured log line
+	_ = json.NewDecoder // decode request body — https://pkg.go.dev/encoding/json#NewDecoder
+	_ = http.Error      // write an error status + plain-text body — https://pkg.go.dev/net/http#Error
+	_ = strings.Join    // join a []string with a separator — https://pkg.go.dev/strings#Join
+	_ = fmt.Fprintf     // write formatted string to any io.Writer — https://pkg.go.dev/fmt#Fprintf
+	_ = slog.Info       // structured log line — https://pkg.go.dev/log/slog
 )
 
 // ServeHTTP implements http.Handler. A struct with a ServeHTTP method satisfies
@@ -45,18 +45,26 @@ var (
 // EXERCISE — implement this method.
 //
 // Concepts practiced:
-//   - Method validation: reject non-POST requests with http.Error + http.StatusMethodNotAllowed.
+//   - Method validation: reject non-POST requests.
+//     http.Error(w, msg, code) writes the status code and a plain-text body in one call.
+//     https://pkg.go.dev/net/http#Error
 //   - json.NewDecoder(r.Body).Decode(&v): r.Body is an io.ReadCloser; NewDecoder accepts io.Reader.
+//     https://pkg.go.dev/encoding/json#Decoder.Decode
+//   - strings.Join(slice, sep): concatenates a []string with a separator between elements.
+//     https://pkg.go.dev/strings#Join
 //   - SSE response headers: Content-Type "text/event-stream", Cache-Control "no-cache",
-//     Connection "keep-alive" — must be set BEFORE any body is written.
+//     Connection "keep-alive" — must be set before any body bytes are written.
+//     w.Header().Set(key, value) — sets a single header. https://pkg.go.dev/net/http#Header.Set
+//     Reference: https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events
 //   - http.Flusher type assertion (comma-ok form):
 //       flusher, ok := w.(http.Flusher)
-//     Not all ResponseWriters implement Flusher — always use the comma-ok form.
+//     Not all ResponseWriters implement Flusher — always use the comma-ok form to avoid a panic.
 //     https://pkg.go.dev/net/http#Flusher
-//   - slog.Info("event", "key", value): structured logging.
+//   - slog.Info("event", "key", value): structured key-value logging.
 //     https://pkg.go.dev/log/slog
-//   - fmt.Fprintf(w, "data: {\"error\":%q}\n\n", err): writing an SSE error frame
-//     after headers have already been sent (can't change status code at this point).
+//   - fmt.Fprintf(w, format, args): writes a formatted string to any io.Writer.
+//     Used here to send an SSE error frame after headers are already sent.
+//     https://pkg.go.dev/fmt#Fprintf
 //
 // Steps:
 //  1. If r.Method != http.MethodPost, call http.Error(w, "method not allowed", 405) and return.
