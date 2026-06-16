@@ -50,6 +50,50 @@ var (
 //     then append results[k].context for k in 0..topN-1.
 //     Hint: range over results[:topN] and use _ to discard the index.
 //  7. Return the slice of context strings.
+
+type scored struct {
+	context string
+	score   int
+}
+
 func Retrieve(rows []Row, query string, topN int) []string {
-	panic("not implemented")
+
+	split_words := strings.Fields(strings.ToLower(query))
+
+	results := make([]scored, 0, len(rows))
+
+	for _, row := range rows {
+		lower_row := strings.ToLower(row.Context)
+
+		var score int = 0
+		for _, word := range split_words {
+			if strings.Contains(lower_row, word) {
+				score++
+			}
+		}
+
+		if score > 0 {
+			results = append(results, scored{
+				context: row.Context,
+				score:   score,
+			})
+		}
+	}
+
+	sort.Slice(results, func(a, b int) bool {
+		return results[a].score > results[b].score
+	})
+
+	if topN > len(results) {
+		topN = len(results)
+	}
+
+	out := make([]string, 0, topN)
+
+	for _, r := range results[:topN] {
+
+		out = append(out, r.context)
+	}
+
+	return out
 }

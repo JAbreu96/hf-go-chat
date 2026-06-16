@@ -5,8 +5,12 @@ package config
 
 import (
 	"errors"
+	"log"
+	"log/slog"
 	"os"
 	"strconv"
+
+	"github.com/joho/godotenv"
 )
 
 // DefaultModel is a constant — value fixed at compile time, stored in read-only memory.
@@ -17,7 +21,7 @@ const (
 	DefaultPort       = "8080"
 	DefaultDataset    = "rajpurkar/squad"
 	DefaultDatasetCfg = "plain_text"
-	DefaultLimit      = 1000
+	DefaultLimit      = "1000"
 )
 
 // Packages available for your implementation — the blank identifier keeps them importable
@@ -71,5 +75,59 @@ type Config struct {
 //     If empty, use DefaultLimit.
 //  7. Return a fully populated Config{...} and nil as the error.
 func Load() (Config, error) {
-	panic("not implemented")
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+
+	hf_token := os.Getenv("HF_TOKEN")
+	brave_token := os.Getenv("BRAVE_API_KEY")
+	port := os.Getenv("PORT")
+	hf_model := os.Getenv("HF_MODEL")
+	dataset_name := os.Getenv("DATASET_NAME")
+	dataset_limit := os.Getenv("DATASET_LIMIT")
+
+	slog.Info(hf_token)
+	if len(hf_token) < 1 {
+		return Config{}, errors.New("HF_TOKEN environment variable is required")
+	}
+
+	if len(brave_token) < 1 {
+		return Config{}, errors.New("BRAVE_TOKEN environment variable is required")
+	}
+
+	if len(port) < 1 {
+		port = DefaultPort
+	}
+
+	if len(hf_model) < 1 {
+		hf_model = DefaultModel
+	}
+
+	if len(dataset_name) < 1 {
+		dataset_name = DefaultDataset
+	}
+
+	if len(dataset_limit) < 1 {
+		dataset_limit = DefaultLimit
+	}
+
+	ds_limit, e := strconv.Atoi(dataset_limit)
+
+	if e != nil {
+		return Config{}, errors.New("DATASET_LIMIT must be an integer")
+	}
+
+	config := Config{
+		HFToken:      hf_token,
+		BraveKey:     brave_token,
+		Port:         port,
+		Model:        hf_model,
+		DatasetName:  dataset_name,
+		DatasetLimit: ds_limit,
+		DatasetCfg:   DefaultDatasetCfg,
+	}
+
+	return config, nil
+
 }
