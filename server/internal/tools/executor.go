@@ -39,10 +39,21 @@ var (
 //  1. If len(calls) == 0, return "", nil immediately.
 //  2. Take only the first call: call := calls[0].
 //  3. Switch on call.Function.Name:
-//       case "web_search": return e.runWebSearch(ctx, call.Function.Arguments)
-//       default: return "", fmt.Errorf("unknown tool: %s", call.Function.Name)
+//     case "web_search": return e.runWebSearch(ctx, call.Function.Arguments)
+//     default: return "", fmt.Errorf("unknown tool: %s", call.Function.Name)
 func (e *Executor) Run(ctx context.Context, calls []hf.ToolCall) (string, error) {
-	panic("not implemented")
+	if len(calls) == 0 {
+		return "", nil
+	}
+
+	call := calls[0]
+
+	switch call.Function.Name {
+	case "web_search":
+		return e.runWebSearch(ctx, call.Function.Arguments)
+	default:
+		return "", fmt.Errorf("unknown tool: %s", call.Function.Name)
+	}
 }
 
 // runWebSearch parses the model's JSON-encoded arguments and calls Brave Search.
@@ -67,11 +78,31 @@ func (e *Executor) Run(ctx context.Context, calls []hf.ToolCall) (string, error)
 //     Call json.Unmarshal([]byte(arguments), &args).
 //     Return a wrapped error on failure.
 //  2. Extract the query with a type assertion:
-//       query, ok := args["query"].(string)
+//     query, ok := args["query"].(string)
 //     If !ok or query == "", return an error: "web_search requires a non-empty query string"
 //  3. Call Search(ctx, e.braveKey, query, 3) and return its result.
 func (e *Executor) runWebSearch(ctx context.Context, arguments string) (string, error) {
-	panic("not implemented")
+	var args map[string]any
+
+	err := json.Unmarshal([]byte(arguments), &args)
+
+	if err == nil {
+		return "", fmt.Errorf("Error: %w", err)
+	}
+
+	query, ok := args["query"].(string)
+
+	if !ok || query == "" {
+		return "", fmt.Errorf("web_search requires non-empty query string")
+	}
+
+	res, err := Search(ctx, e.braveKey, query, 3)
+
+	if err == nil {
+		return "", fmt.Errorf("Error: %w", err)
+	}
+
+	return res, nil
 }
 
 // WebSearchTool returns the tool definition sent to the HF model.

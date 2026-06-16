@@ -67,9 +67,10 @@ var (
 //     https://go.dev/blog/go1.13-errors
 //
 // Steps:
+//
 //  1. Build the query string using url.Values. Set these keys:
-//       "dataset" → dataset, "config" → config, "split" → "train",
-//       "offset" → "0", "limit" → fmt.Sprintf("%d", limit)
+//     "dataset" → dataset, "config" → config, "split" → "train",
+//     "offset" → "0", "limit" → fmt.Sprintf("%d", limit)
 //     Produce the full endpoint: datasetsBaseURL + "?" + params.Encode()
 //
 //  2. Create an http.Client with a 30-second timeout.
@@ -90,6 +91,49 @@ var (
 //     Loop over result.Rows, appending each r.Row to rows.
 //
 //  8. Return rows, nil.
+
 func Load(ctx context.Context, dataset, config string, limit int) ([]Row, error) {
-	panic("not implemented")
+	params := url.Values{}
+
+	params.Set("dataset", dataset)
+	params.Set("config", config)
+	params.Set("split", "train")
+	params.Set("offset", "0")
+	params.Set("limit", fmt.Sprintf("%d", limit))
+
+	endpoint := datasetsBaseURL + "?" + params.Encode()
+
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+
+	if err != nil {
+		return nil, fmt.Errorf("Error: %w", err)
+	}
+
+	res, err := client.Do(req)
+
+	if err != nil {
+		return nil, fmt.Errorf("Get request has failed: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(res.Body)
+
+		return nil, fmt.Errorf("datasets API %d: %s", res.StatusCode, string(body))
+	}
+
+	var result datasetsResponse;
+
+	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decoding dataset response: %w", err)
+	}
+
+	
+
+	out := make([]Row, 0, 100)
+
+	return out, nil
+
 }

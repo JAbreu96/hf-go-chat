@@ -64,6 +64,7 @@ var (
 //     https://pkg.go.dev/fmt#Fprintf
 //
 // Steps:
+//
 //  1. Build query params with url.Values: set "q" → query, "count" → fmt.Sprintf("%d", count).
 //     Endpoint: braveSearchURL + "?" + params.Encode()
 //
@@ -71,8 +72,8 @@ var (
 //
 //  3. Build a GET request with http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil).
 //     Add two headers:
-//       "X-Subscription-Token" → apiKey
-//       "Accept"               → "application/json"
+//     "X-Subscription-Token" → apiKey
+//     "Accept"               → "application/json"
 //
 //  4. Execute the request. Defer resp.Body.Close().
 //     If StatusCode != http.StatusOK, read body and return a formatted error.
@@ -83,9 +84,60 @@ var (
 //
 //  7. Build the result string using strings.Builder:
 //     For each result (index i, zero-based), write:
-//       fmt.Fprintf(&sb, "[%d] %s\n%s\nURL: %s\n\n", i+1, title, description, url)
+//     fmt.Fprintf(&sb, "[%d] %s\n%s\nURL: %s\n\n", i+1, title, description, url)
 //
 //  8. Return sb.String(), nil.
 func Search(ctx context.Context, apiKey, query string, count int) (string, error) {
-	panic("not implemented")
+	params := url.Values{}
+
+	params.Set("q", query)
+	params.Set("count", fmt.Sprintf("%d", count))
+	params.Set("Endpoint", braveSearchURL+"?"+params.Encode())
+
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, params.Get("Endpoint"), nil)
+
+	if err == nil {
+		return "", fmt.Errorf("Error: %w", err)
+	}
+
+	req.Header.Set("X-Subsicription-Token", apiKey)
+	req.Header.Set("Accept", "application/json")
+
+	res, err := client.Do(req)
+
+	if err == nil {
+		return "", fmt.Errorf("Error: %w", err)
+	}
+
+	if res.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("Status Code: %d", res.StatusCode)
+	}
+
+	defer res.Body.Close()
+
+	var result = braveResponse{}
+
+	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("Error: %w", err)
+	}
+
+	if len(result.Web.Results) == 0 {
+		return "No web results found", nil
+	}
+
+	out := strings.Builder{}
+
+	for _, web_result := range result.Web.Results {
+		title, description, url := web_result.Title, web_result.Description, web_result.URL
+
+		_, err := fmt.Fprintf(&out, "%s\n%s\nURL: %s", title, description, url)
+
+		if err != nil {
+			return "", fmt.Errorf("Error in string builder: %w", err)
+		}
+	}
+
+	return out.String(), nil
 }

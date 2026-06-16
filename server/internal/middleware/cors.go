@@ -37,12 +37,25 @@ var (
 //  1. Return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { ... })
 //     Inside the function:
 //  2. Call w.Header().Set three times:
-//       "Access-Control-Allow-Origin"  → "*"
-//       "Access-Control-Allow-Methods" → "POST, GET, OPTIONS"
-//       "Access-Control-Allow-Headers" → "Content-Type"
+//     "Access-Control-Allow-Origin"  → "*"
+//     "Access-Control-Allow-Methods" → "POST, GET, OPTIONS"
+//     "Access-Control-Allow-Headers" → "Content-Type"
 //  3. If r.Method == http.MethodOptions (the browser preflight), write status 204
 //     with w.WriteHeader(http.StatusNoContent) and return immediately.
 //  4. Otherwise call next.ServeHTTP(w, r) to hand off to the wrapped handler.
 func CORS(next http.Handler) http.Handler {
-	panic("not implemented")
+	a := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	}
+
+	return http.HandlerFunc(a)
 }
