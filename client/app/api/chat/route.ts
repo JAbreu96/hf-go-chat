@@ -60,5 +60,30 @@ const GO_BACKEND = process.env.GO_BACKEND_URL ?? "http://localhost:8080";
 //       -H 'Content-Type: application/json' \
 //       -d '{"messages":[{"role":"user","content":"Hello"}]}'
 export async function POST(req: NextRequest) {
-  throw new Error("not implemented — see the steps above");
+  const body = await req.json();
+
+  const REQ_BODY = {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(body),
+    cache: "no-store" as const
+  }
+
+  const res = await fetch(`${GO_BACKEND}/api/chat`, REQ_BODY);
+
+  if (!res.ok) {
+    return new Response("upstream error", { status: res.status })
+  }
+
+  const sse_response = new Response(res.body, {
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive"
+    }
+  })
+
+  return sse_response;
 }
