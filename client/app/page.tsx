@@ -113,7 +113,79 @@ export default function ChatPage() {
   //   catch: setMessages with the error string as the assistant content
   //   finally: setIsStreaming(false)
   async function handleSubmit(e: React.FormEvent) {
-    throw new Error("not implemented — see the steps above");
+    e.preventDefault()
+    const text = input.trim();
+
+    if (!text || isStreaming) {
+      return;
+    }
+
+    const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: text }
+    const agentMsg: Message = { id: crypto.randomUUID(), role: 'assistant', content: "" }
+
+    setMessages((prev) => [...prev, userMsg, agentMsg])
+    setInput("")
+    setIsStreaming(true)
+
+    const REQ_BODY = {
+      messages: [...messages, userMsg].map(({ role, content }) => ({ role, content }))
+    }
+
+    const init: RequestInit = {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(REQ_BODY)
+    }
+
+    try {
+      const res = await fetch("/api/chat", init)
+      if (!res.ok || !res.body) {
+        throw new Error("Message failed to send. Try again later")
+      }
+      await readStream(res, agentMsg);
+    } catch (e) {
+      setMessages((prev) =>
+        prev.map((m) => m.id === agentMsg.id ? { ...m, content: "" + e } : m)
+      );
+    } finally {
+      setIsStreaming(false);
+    }
+  }
+
+  async function readStream(res: Response, agentMsg: Message) {
+    const reader = res.body?.getReader()
+    const decoder = new TextDecoder()
+
+    let buffer = ""
+
+    while (true && reader) {
+      const { value, done } = await reader.read();
+
+      if (done) {
+        break
+      }
+      buffer += decoder.decode(value, { stream: true })
+
+      const lines = buffer.split("\n")
+
+      buffer = lines.pop() ?? ""
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        const token = parseDelta(line.trim())
+
+        setMessages(prev => prev.map((message) => {
+          if (message.id === agentMsg.id) {
+            return { ...message, content: message.content + `${token ?? ""}` }
+          } else {
+            return message
+          }
+        }))
+      }
+    }
   }
 
   return (
@@ -139,11 +211,10 @@ export default function ChatPage() {
             className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
           >
             <div
-              className={`max-w-[75%] rounded-2xl px-4 py-3 text-sm whitespace-pre-wrap leading-relaxed ${
-                msg.role === "user"
-                  ? "bg-blue-600 text-white rounded-br-sm"
-                  : "bg-gray-800 text-gray-100 rounded-bl-sm"
-              }`}
+              className={`max-w-[75%] rounded-2xl px-4 py-3 text-sm whitespace-pre-wrap leading-relaxed ${msg.role === "user"
+                ? "bg-blue-600 text-white rounded-br-sm"
+                : "bg-gray-800 text-gray-100 rounded-bl-sm"
+                }`}
             >
               {/* Show a pulsing cursor while the assistant message is empty and streaming */}
               {msg.role === "assistant" && isStreaming && msg.content === "" ? (
