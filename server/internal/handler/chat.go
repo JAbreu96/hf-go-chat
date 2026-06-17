@@ -57,7 +57,7 @@ var (
 //     w.Header().Set(key, value) — sets a single header. https://pkg.go.dev/net/http#Header.Set
 //     Reference: https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events
 //   - http.Flusher type assertion (comma-ok form):
-//       flusher, ok := w.(http.Flusher)
+//     flusher, ok := w.(http.Flusher)
 //     Not all ResponseWriters implement Flusher — always use the comma-ok form to avoid a panic.
 //     https://pkg.go.dev/net/http#Flusher
 //   - slog.Info("event", "key", value): structured key-value logging.
@@ -67,21 +67,22 @@ var (
 //     https://pkg.go.dev/fmt#Fprintf
 //
 // Steps:
+//
 //  1. If r.Method != http.MethodPost, call http.Error(w, "method not allowed", 405) and return.
 //
 //  2. Decode the request body into:
-//       var req struct { Messages []hf.Message `json:"messages"` }
+//     var req struct { Messages []hf.Message `json:"messages"` }
 //     On error: http.Error(w, "invalid JSON body", http.StatusBadRequest) and return.
 //     If len(req.Messages) == 0: http.Error(w, "messages array is required", 400) and return.
 //
 //  3. RAG retrieval:
-//       lastUserContent := lastUserMessage(req.Messages)
-//       contexts := rag.Retrieve(h.rows, lastUserContent, 3)
+//     lastUserContent := lastUserMessage(req.Messages)
+//     contexts := rag.Retrieve(h.rows, lastUserContent, 3)
 //     Build systemPrompt: start with systemPromptBase; if len(contexts) > 0, append:
-//       "\n\nReference material:\n" + strings.Join(contexts, "\n---\n")
+//     "\n\nReference material:\n" + strings.Join(contexts, "\n---\n")
 //
 //  4. Prepend system message:
-//       messages := append([]hf.Message{{Role:"system", Content:systemPrompt}}, req.Messages...)
+//     messages := append([]hf.Message{{Role:"system", Content:systemPrompt}}, req.Messages...)
 //
 //  5. Set SSE response headers on w (three calls to w.Header().Set).
 //
@@ -90,13 +91,65 @@ var (
 //  7. slog.Info("chat request", "messages", len(req.Messages), "rag_contexts", len(contexts))
 //
 //  8. Call h.client.Run(r.Context(), messages, []hf.Tool{tools.WebSearchTool()},
-//       h.executor.Run, w, flusher.Flush)
+//     h.executor.Run, w, flusher.Flush)
 //     If err != nil:
-//       fmt.Fprintf(w, "data: {\"error\":%q}\n\n", err.Error())
-//       flusher.Flush()
-//       slog.Error("chat handler error", "err", err)
+//     fmt.Fprintf(w, "data: {\"error\":%q}\n\n", err.Error())
+//     flusher.Flush()
+//     slog.Error("chat handler error", "err", err)
 func (h *Chat) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	panic("not implemented")
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+
+	var mes struct {
+		Messages []hf.Message `json:"messages"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&mes); err != nil {
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	if len(mes.Messages) == 0 {
+		http.Error(w, "messages array is required", 400)
+		return
+	}
+
+	lastUserContent := lastUserMessage(mes.Messages)
+
+	contexts := rag.Retrieve(h.rows, lastUserContent, 3)
+
+	systemPrompt := make([]string, 0, 1000)
+	systemPrompt = append(systemPrompt, systemPromptBase)
+
+	if len(contexts) > 0 {
+		systemPrompt = append(systemPrompt, "\n\nReference Material:\n", strings.Join(contexts, "\n---\n"))
+	}
+
+	messages := append([]hf.Message{{Role: "system", Content: strings.Join(systemPrompt, "\n---\n")}}, mes.Messages...)
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	flusher, ok := w.(http.Flusher)
+
+	if !ok {
+		http.Error(w, "Response Writer is not of type http.Flusher", 500)
+		return
+	}
+
+	slog.Info("Chat Request", "Messages", len(mes.Messages), "Rag Contexts", len(contexts))
+
+	err := h.client.Run(r.Context(), messages, []hf.Tool{tools.WebSearchTool()}, h.executor.Run, w, flusher.Flush)
+
+	if err != nil {
+		fmt.Fprintf(w, "data: {\"error\":%q}\n\n", err.Error())
+		flusher.Flush()
+		slog.Error("chat handler error", "err", err)
+	}
+
 }
 
 // lastUserMessage finds the content of the most recent user turn.

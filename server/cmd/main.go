@@ -80,6 +80,7 @@ var (
 //     https://go.dev/tour/flowcontrol/12
 //
 // Steps:
+//
 //  1. slog.Info("starting hf-go-chat server")
 //
 //  2. cfg, err := config.Load(). On error: slog.Error + os.Exit(1).
@@ -90,44 +91,101 @@ var (
 //     slog.Info("dataset loaded", "rows", len(rows))
 //
 //  4. Wire up dependencies:
-//       hfClient  := hf.NewClient(cfg.HFToken, cfg.Model)
-//       executor  := tools.NewExecutor(cfg.BraveKey)
-//       chatHandler := handler.NewChat(hfClient, executor, rows)
+//     hfClient  := hf.NewClient(cfg.HFToken, cfg.Model)
+//     executor  := tools.NewExecutor(cfg.BraveKey)
+//     chatHandler := handler.NewChat(hfClient, executor, rows)
 //
 //  5. Create the mux (http.NewServeMux) and register routes:
-//       "GET /health"    → handler.Health (a plain func — use mux.HandleFunc)
-//       "POST /api/chat" → chatHandler    (implements http.Handler — use mux.Handle)
+//     "GET /health"    → handler.Health (a plain func — use mux.HandleFunc)
+//     "POST /api/chat" → chatHandler    (implements http.Handler — use mux.Handle)
 //
 //  6. Create the server:
-//       srv := &http.Server{
-//           Addr:         ":" + cfg.Port,
-//           Handler:      middleware.CORS(mux),
-//           ReadTimeout:  10 * time.Second,
-//           WriteTimeout: 120 * time.Second,
-//           IdleTimeout:  60 * time.Second,
-//       }
+//     srv := &http.Server{
+//     Addr:         ":" + cfg.Port,
+//     Handler:      middleware.CORS(mux),
+//     ReadTimeout:  10 * time.Second,
+//     WriteTimeout: 120 * time.Second,
+//     IdleTimeout:  60 * time.Second,
+//     }
 //
 //  7. Launch the server in a goroutine:
-//       go func() {
-//           slog.Info("listening", "addr", srv.Addr)
-//           if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-//               slog.Error("server error", "err", err)
-//               os.Exit(1)
-//           }
-//       }()
+//     go func() {
+//     slog.Info("listening", "addr", srv.Addr)
+//     if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+//     slog.Error("server error", "err", err)
+//     os.Exit(1)
+//     }
+//     }()
 //
 //  8. Set up graceful shutdown:
-//       quit := make(chan os.Signal, 1)
-//       signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-//       <-quit   // block until Ctrl-C or kill
-//       slog.Info("shutting down")
+//     quit := make(chan os.Signal, 1)
+//     signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+//     <-quit   // block until Ctrl-C or kill
+//     slog.Info("shutting down")
 //
 //  9. Shutdown with a 10-second timeout:
-//       shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-//       defer cancel()
-//       if err := srv.Shutdown(shutdownCtx); err != nil {
-//           slog.Error("shutdown error", "err", err)
-//       }
+//     shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+//     defer cancel()
+//     if err := srv.Shutdown(shutdownCtx); err != nil {
+//     slog.Error("shutdown error", "err", err)
+//     }
 func main() {
-	panic("not implemented")
+	slog.Info("starting hf-go-chat server")
+	cfg, err := config.Load()
+
+	if err != nil {
+		slog.Error(err.Error())
+		os.Exit(1)
+	}
+
+	slog.Info("loading dataset", "name", cfg.DatasetName, "limit", cfg.DatasetLimit)
+
+	rows, err := rag.Load(context.Background(), cfg.DatasetName, cfg.DatasetCfg, cfg.DatasetLimit)
+
+	if err != nil {
+		slog.Error(err.Error())
+		os.Exit(1)
+	}
+
+	slog.Info("Dataset Loaded", "rows", len(rows))
+
+	hfClient := hf.NewClient(cfg.HFToken, cfg.Model)
+	executer := tools.NewExecutor(cfg.BraveKey)
+	chatHandler := handler.NewChat(hfClient, executer, rows)
+
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("GET /health", handler.Health)
+	mux.Handle("POST /api/chat", chatHandler)
+
+	srv := &http.Server{
+		Addr:         ":" + cfg.Port,
+		Handler:      middleware.CORS(mux),
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 120 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	go func() {
+		slog.Info("listening", "addr", srv.Addr)
+		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+			slog.Error(err.Error())
+			os.Exit(1)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	slog.Info("Shutting Down")
+
+	shutdownCTX, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+
+	defer cancel()
+
+	if err := srv.Shutdown(shutdownCTX); err != nil {
+		slog.Error("shutdown error", "err", err)
+	}
+
 }

@@ -30,13 +30,13 @@ type Client struct {
 
 // Packages available for your implementation.
 var (
-	_ = bytes.NewReader   // wraps []byte as an io.Reader — https://pkg.go.dev/bytes#NewReader
-	_ = bufio.NewScanner  // wraps io.Reader for line-by-line reading — https://pkg.go.dev/bufio#NewScanner
-	_ = json.Marshal      // encodes a Go value to JSON bytes — https://pkg.go.dev/encoding/json#Marshal
-	_ = json.NewDecoder   // wraps io.Reader for streaming JSON decode — https://pkg.go.dev/encoding/json#NewDecoder
-	_ = fmt.Fprintf       // writes formatted string to any io.Writer — https://pkg.go.dev/fmt#Fprintf
-	_ = io.ReadAll        // reads all bytes from an io.Reader — https://pkg.go.dev/io#ReadAll
-	_ = time.Second       // time.Duration constant — https://pkg.go.dev/time#Second
+	_ = bytes.NewReader  // wraps []byte as an io.Reader — https://pkg.go.dev/bytes#NewReader
+	_ = bufio.NewScanner // wraps io.Reader for line-by-line reading — https://pkg.go.dev/bufio#NewScanner
+	_ = json.Marshal     // encodes a Go value to JSON bytes — https://pkg.go.dev/encoding/json#Marshal
+	_ = json.NewDecoder  // wraps io.Reader for streaming JSON decode — https://pkg.go.dev/encoding/json#NewDecoder
+	_ = fmt.Fprintf      // writes formatted string to any io.Writer — https://pkg.go.dev/fmt#Fprintf
+	_ = io.ReadAll       // reads all bytes from an io.Reader — https://pkg.go.dev/io#ReadAll
+	_ = time.Second      // time.Duration constant — https://pkg.go.dev/time#Second
 )
 
 // NewClient is a constructor — idiomatic Go uses NewX to return a pointer to a new value.
@@ -47,13 +47,17 @@ var (
 //
 // Steps:
 //  1. Return &Client{ ... } with:
-//       token: token
-//       model: model
-//       httpClient: &http.Client{Timeout: 90 * time.Second}
+//     token: token
+//     model: model
+//     httpClient: &http.Client{Timeout: 90 * time.Second}
 //     Use Go's zero values — only set Timeout; everything else defaults safely.
 //     https://go.dev/ref/spec#The_zero_value
 func NewClient(token, model string) *Client {
-	panic("not implemented")
+	return &Client{
+		token:      token,
+		model:      model,
+		httpClient: &http.Client{Timeout: 90 * time.Second},
+	}
 }
 
 // Run is the agent loop. It calls HF once (non-streaming) to check for tool calls,
@@ -97,10 +101,10 @@ func NewClient(token, model string) *Client {
 //  6. If len(chat.Choices) == 0, return errors.New("hf returned no choices").
 //  7. choice := chat.Choices[0]
 //  8. If choice.FinishReason == "tool_calls":
-//       a. Call executor(ctx, choice.Message.ToolCalls). Return a wrapped error on failure.
-//       b. Append choice.Message to messages (the assistant's tool_call turn).
-//       c. Append a Message{Role:"tool", Content:toolResult, ToolCallID: choice.Message.ToolCalls[0].ID}.
-//       d. continue — loop back and call HF again with the tool result.
+//     a. Call executor(ctx, choice.Message.ToolCalls). Return a wrapped error on failure.
+//     b. Append choice.Message to messages (the assistant's tool_call turn).
+//     c. Append a Message{Role:"tool", Content:toolResult, ToolCallID: choice.Message.ToolCalls[0].ID}.
+//     d. continue — loop back and call HF again with the tool result.
 //  9. If finish_reason is anything else (typically "stop"): return c.stream(ctx, messages, w, flush).
 func (c *Client) Run(
 	ctx context.Context,
@@ -110,7 +114,50 @@ func (c *Client) Run(
 	w io.Writer,
 	flush func(),
 ) error {
-	panic("not implemented")
+	for {
+		res, err := c.call(ctx, messages, tools, false)
+
+		if err != nil {
+			return err
+		}
+
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(res.Body)
+			return fmt.Errorf("Agent Response Error: %d: %s", res.StatusCode, string(body))
+		}
+
+		var c_res ChatResponse
+		if err := json.NewDecoder(res.Body).Decode(&c_res); err != nil {
+			return fmt.Errorf("decoding agent response: %w", err)
+		}
+
+		if len(c_res.Choices) == 0 {
+			return fmt.Errorf("No Agent Response.")
+		}
+
+		choice := c_res.Choices[0]
+
+		if choice.FinishReason == "tool_calls" {
+			tool_call, err := executor(ctx, choice.Message.ToolCalls)
+
+			if err != nil {
+				return fmt.Errorf("Executor Error: %w", err)
+			}
+
+			new_message := Message{
+				Role:       "tool",
+				Content:    tool_call,
+				ToolCallID: choice.Message.ToolCalls[0].ID,
+			}
+
+			messages = append(messages, new_message)
+			continue
+		}
+
+		return c.stream(ctx, messages, w, flush)
+	}
 }
 
 // call makes one POST to the HF completions endpoint and returns the raw *http.Response.
@@ -138,7 +185,24 @@ func (c *Client) Run(
 //  4. Set headers: "Authorization" → "Bearer " + c.token, "Content-Type" → "application/json".
 //  5. Return c.httpClient.Do(req).
 func (c *Client) call(ctx context.Context, messages []Message, tools []Tool, stream bool) (*http.Response, error) {
-	panic("not implemented")
+	chat_req := ChatRequest{Model: c.model, Messages: messages, Tools: tools, Stream: stream}
+
+	json_encode, err := json.Marshal(chat_req)
+
+	if err != nil {
+		return nil, fmt.Errorf("Encoding Error: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL, bytes.NewReader(json_encode))
+
+	if err != nil {
+		return nil, fmt.Errorf("Req Error: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
+
+	return c.httpClient.Do(req)
 }
 
 // stream makes a streaming POST and writes each SSE line to w, flushing after each one.
@@ -166,11 +230,38 @@ func (c *Client) call(ctx context.Context, messages []Message, tools []Tool, str
 //  3. Create a bufio.NewScanner(resp.Body).
 //     Call scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024) to raise the limit.
 //  4. Loop with scanner.Scan():
-//       line := scanner.Text()
-//       if line == "" { continue }
-//       fmt.Fprintf(w, "%s\n\n", line)
-//       flush()
+//     line := scanner.Text()
+//     if line == "" { continue }
+//     fmt.Fprintf(w, "%s\n\n", line)
+//     flush()
 //  5. Return scanner.Err().
 func (c *Client) stream(ctx context.Context, messages []Message, w io.Writer, flush func()) error {
-	panic("not implemented")
+	res, err := c.call(ctx, messages, nil, true)
+
+	if err != nil {
+		return fmt.Errorf("Response Error: %w", err)
+	}
+
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(res.Body)
+
+		return fmt.Errorf("Stream Response Error: %d: %s", res.StatusCode, string(body))
+	}
+
+	scanner := bufio.NewScanner(res.Body)
+
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	for scanner.Scan() == true {
+		line := scanner.Text()
+
+		if line == "" {
+			continue
+		}
+
+		fmt.Fprintf(w, "%s\n\n", line)
+		flush()
+	}
+
+	return scanner.Err()
 }

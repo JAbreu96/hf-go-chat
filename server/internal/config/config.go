@@ -5,8 +5,11 @@ package config
 
 import (
 	"errors"
+	"log"
 	"os"
 	"strconv"
+
+	"github.com/joho/godotenv"
 )
 
 // DefaultModel is a constant — value fixed at compile time, stored in read-only memory.
@@ -39,6 +42,10 @@ type Config struct {
 // The caller must check the error before using cfg.
 // https://go.dev/tour/basics/6
 func Load() (Config, error) {
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
 	token := os.Getenv("HF_TOKEN")
 	// if err != nil — the canonical Go error check. There is no try/catch.
 	// https://go.dev/blog/error-handling-and-go
